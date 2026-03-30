@@ -1,11 +1,11 @@
 import os
-import io
 import json
 import time
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file
 from deluge_client import DelugeRPCClient
 from apscheduler.schedulers.background import BackgroundScheduler
+import io
 
 app = Flask(__name__)
 scheduler = BackgroundScheduler()
@@ -14,7 +14,7 @@ scheduler = BackgroundScheduler()
 APP_VERSION = "2026.03.31"
 
 # --- INFRASTRUCTURE CONFIGURATION ---
-DELUGE_HOST = os.environ.get('DELUGE_HOST', '192.168.50.123')
+DELUGE_HOST = os.environ.get('DELUGE_HOST', '')
 DELUGE_PORT = int(os.environ.get('DELUGE_PORT', 58846))
 DELUGE_USER = os.environ.get('DELUGE_USER', '')
 DELUGE_PASS = os.environ.get('DELUGE_PASS', '')
@@ -254,6 +254,7 @@ MASTER_TEMPLATE = """
         * { box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; margin: 0; background-color: var(--bg-main); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
 
+        /* DESKTOP SIDEBAR */
         .sidebar { 
             width: 260px; 
             flex-shrink: 0; 
@@ -261,8 +262,8 @@ MASTER_TEMPLATE = """
             display: flex; 
             flex-direction: column; 
             border-right: 1px solid var(--border-color); 
-            z-index: 10; 
-            transition: width 0.25s ease;
+            z-index: 1000; 
+            transition: width 0.25s ease, left 0.3s ease;
             overflow: hidden; 
         }
         
@@ -291,6 +292,7 @@ MASTER_TEMPLATE = """
         .nav-action:hover { background-color: var(--accent-hover); color: white; }
         .version-tag { padding: 15px 25px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+        /* DESKTOP SIDEBAR COLLAPSED STATE */
         body.sidebar-collapsed .sidebar { width: 72px; }
         body.sidebar-collapsed .brand { justify-content: center; padding: 20px 0; }
         body.sidebar-collapsed .nav-text,
@@ -299,9 +301,10 @@ MASTER_TEMPLATE = """
         body.sidebar-collapsed .nav-link { justify-content: center; padding: 12px 0; }
         body.sidebar-collapsed .nav-icon { margin-right: 0; }
         
-        .main-content { flex-grow: 1; padding: 0 40px 40px 40px; overflow-y: auto; }
+        .main-content { flex-grow: 1; padding: 0 40px 40px 40px; overflow-y: auto; position: relative; }
         
-        .top-header { display: flex; align-items: center; gap: 15px; padding: 25px 0; margin-bottom: 20px; }
+        /* Updated z-index so the menu button is never blocked by the tables */
+        .top-header { display: flex; align-items: center; gap: 15px; padding: 25px 0; margin-bottom: 20px; position: relative; z-index: 1050; }
         .page-header { font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }
         
         .btn-toggle-sidebar { background: none; border: none; padding: 8px; cursor: pointer; color: var(--text-muted); border-radius: 6px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
@@ -312,21 +315,22 @@ MASTER_TEMPLATE = """
         body:not(.sidebar-collapsed) .icon-expand { display: none; }
 
         .card { background-color: var(--bg-card); border-radius: 12px; border: 1px solid var(--border-color); padding: 24px; margin-bottom: 30px; }
-        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; }
         .card-title { font-size: 18px; font-weight: 600; margin: 0; }
 
-        table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        th { text-align: left; padding: 12px 16px; color: var(--text-muted); font-weight: 500; border-bottom: 2px solid var(--border-color); }
+        .table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 6px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 600px; }
+        th { text-align: left; padding: 12px 16px; color: var(--text-muted); font-weight: 500; border-bottom: 2px solid var(--border-color); white-space: nowrap; }
         td { padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-main); }
         tr:last-child td { border-bottom: none; }
         tr:hover td { background-color: rgba(255, 255, 255, 0.02); }
 
         input[type="text"], input[type="number"], select { padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-input); color: var(--text-main); font-family: 'Inter', sans-serif; font-size: 14px; }
-        input[type="file"] { padding: 6px 10px; border: 1px dashed var(--border-color); background: rgba(255,255,255,0.02); color: var(--text-muted); cursor: pointer; border-radius: 6px; font-family: 'Inter', sans-serif; font-size: 13px;}
+        input[type="file"] { padding: 6px 10px; border: 1px dashed var(--border-color); background: rgba(255,255,255,0.02); color: var(--text-muted); cursor: pointer; border-radius: 6px; font-family: 'Inter', sans-serif; font-size: 13px; width: 100%;}
         input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
         option { background-color: var(--bg-main); color: var(--text-main); }
 
-        .btn { background-color: var(--border-color); color: var(--text-main); padding: 10px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.2s ease; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; font-size: 14px; }
+        .btn { background-color: var(--border-color); color: var(--text-main); padding: 10px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.2s ease; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; font-size: 14px; white-space: nowrap;}
         .btn:hover { background-color: #475569; }
         .btn-primary { background-color: var(--accent); color: white; }
         .btn-primary:hover { background-color: var(--accent-hover); }
@@ -343,16 +347,16 @@ MASTER_TEMPLATE = """
         .settings-group { margin-bottom: 25px; }
         
         .data-management-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; }
-        .data-actions { display: flex; gap: 10px; align-items: center; }
-    
-	/* MOBILE OVERLAY BACKGROUND */
+        .data-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        
+        /* MOBILE OVERLAY BACKGROUND */
         .mobile-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 990; backdrop-filter: blur(2px); }
 
         /* RESPONSIVE DESIGN FOR MOBILE DEVICES */
         @media (max-width: 768px) {
             body { flex-direction: column; }
             
-            /* 1. Sidebar becomes a sliding drawer */
+            /* Sidebar becomes a sliding drawer */
             .sidebar { position: fixed; top: 0; bottom: 0; left: -260px; width: 260px !important; box-shadow: 4px 0 15px rgba(0,0,0,0.5); z-index: 1000; transition: left 0.3s ease; }
             body.mobile-sidebar-open .sidebar { left: 0; }
             body.mobile-sidebar-open .mobile-overlay { display: block; }
@@ -363,16 +367,16 @@ MASTER_TEMPLATE = """
             body.sidebar-collapsed .nav-icon { margin-right: 12px; }
             body.sidebar-collapsed .brand { justify-content: flex-start; padding: 20px 15px; }
             
-            /* 2. Main Content Spacing */
+            /* Main Content Adjustments */
             .main-content { padding: 0 15px 30px 15px; width: 100%; }
             .top-header { padding: 15px 0; margin-bottom: 10px; }
             .page-header { font-size: 22px; }
             .card { padding: 15px; }
             
-            /* 3. Make Tables Swipeable */
+            /* Make Tables Swipeable */
             table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
             
-            /* 4. Stack Forms & Buttons vertically for thumbs */
+            /* Stack Forms & Buttons vertically for thumbs */
             .form-row { flex-direction: column; align-items: stretch; gap: 10px; }
             .form-row input, .form-row select, .form-row button, .form-row label { width: 100% !important; margin-left: 0 !important; }
             
@@ -381,12 +385,12 @@ MASTER_TEMPLATE = """
             .btn { width: 100%; justify-content: center; }
             #trackerFilter, .tag-input { width: 100% !important; }
         }
-	</style>
-	
-	
+    </style>
 </head>
 <body>
+    
     <div class="mobile-overlay" id="mobileOverlay"></div>
+
     <div class="sidebar" id="sidebar">
         <div class="brand">
             <img src="{{ url_for('favicon') }}?v={{ version }}" class="brand-logo" alt="Logo">
@@ -450,59 +454,59 @@ MASTER_TEMPLATE = """
                     </select>
                 </div>
                 
-                <table id="trackerTable">
-                    <tr>
-                        <th>Tracker Domain</th>
-                        <th>Active Torrents</th>
-                        <th>Tag Assignment</th>
-                    </tr>
-                    {% for tracker, count in tracker_summary.items() %}
-                    <tr class="tracker-row">
-                        <td style="font-weight: 500;">{{ tracker }}</td>
-                        <td>{{ count }}</td>
-                        <td><input type="text" class="tag-input" name="{{ tracker }}" value="{{ groups.get(tracker, '') }}" placeholder="Assign Tag..." style="width: 200px;"></td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 30px;">No active torrents found in Deluge.</td></tr>
-                    {% endfor %}
-                </table>
+                <div class="table-wrapper">
+                    <table id="trackerTable">
+                        <tr>
+                            <th>Tracker Domain</th>
+                            <th>Active Torrents</th>
+                            <th>Tag Assignment</th>
+                        </tr>
+                        {% for tracker, count in tracker_summary.items() %}
+                        <tr class="tracker-row">
+                            <td style="font-weight: 500;">{{ tracker }}</td>
+                            <td>{{ count }}</td>
+                            <td><input type="text" class="tag-input" name="{{ tracker }}" value="{{ groups.get(tracker, '') }}" placeholder="Assign Tag..." style="width: 200px;"></td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 30px;">No active torrents found in Deluge.</td></tr>
+                        {% endfor %}
+                    </table>
+                </div>
                 <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
                     <button type="submit" class="btn btn-primary">Save Tags</button>
                 </div>
             </form>
         </div>
         <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const toggleBtn = document.getElementById('sidebarToggle');
-            const mobileOverlay = document.getElementById('mobileOverlay');
-            
-            // Only auto-collapse on desktop
-            if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
-                document.body.classList.add('sidebar-collapsed');
+            function filterTrackers() {
+                try {
+                    const select = document.getElementById('trackerFilter');
+                    if (!select) return;
+                    const filter = select.value;
+                    localStorage.setItem('trackerFilterPref', filter);
+                    const rows = document.querySelectorAll('.tracker-row');
+                    rows.forEach(row => {
+                        const input = row.querySelector('.tag-input');
+                        if (!input) return;
+                        const isTagged = input.value.trim() !== '';
+                        if (filter === 'all') row.style.display = '';
+                        else if (filter === 'tagged' && isTagged) row.style.display = '';
+                        else if (filter === 'untagged' && !isTagged) row.style.display = '';
+                        else row.style.display = 'none';
+                    });
+                } catch(e) { console.error('Filter error:', e); }
             }
-
-            if (toggleBtn) {
-                toggleBtn.addEventListener('click', () => {
-                    if (window.innerWidth <= 768) {
-                        // On mobile: Slide sidebar out
-                        document.body.classList.toggle('mobile-sidebar-open');
-                    } else {
-                        // On desktop: Shrink sidebar
-                        document.body.classList.toggle('sidebar-collapsed');
-                        localStorage.setItem('sidebarCollapsed', document.body.classList.contains('sidebar-collapsed'));
-                    }
-                });
-            }
-            
-            // Close sidebar if clicking the dark overlay on mobile
-            if (mobileOverlay) {
-                mobileOverlay.addEventListener('click', () => {
-                    document.body.classList.remove('mobile-sidebar-open');
-                });
-            }
-        });
+            window.addEventListener('DOMContentLoaded', () => {
+                setTimeout(() => {
+                    try {
+                        const savedFilter = localStorage.getItem('trackerFilterPref');
+                        const select = document.getElementById('trackerFilter');
+                        if (savedFilter && select) { select.value = savedFilter; }
+                        filterTrackers();
+                    } catch(e) {}
+                }, 50);
+            });
         </script>
-
 
         {% elif active_page == 'rules' %}
         <div class="card">
@@ -549,35 +553,37 @@ MASTER_TEMPLATE = """
             </form>
 
             <h3 class="card-title" style="margin-bottom: 15px;">Active Rules</h3>
-            <table>
-                <tr>
-                    <th>Tag</th><th>Label</th><th>State</th><th>Metric</th><th>Threshold</th><th>Min Keep</th><th>Sorting Priority</th><th>Del Data?</th><th></th>
-                </tr>
-                {% for rule in rules %}
-                <tr>
-                    <td><strong style="color: var(--accent);">{{ rule.group_id }}</strong></td>
-                    <td>{{ rule.label }}</td>
-                    <td><span style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">{{ rule.get('target_state', 'All') }}</span></td>
-                    <td>{{ 'Time Since Added' if rule.get('time_metric') == 'time_added' else 'Seeding Time' }}</td>
-                    <td>> {{ rule.max_hours }} hrs</td>
-                    <td>{{ rule.get('min_torrents', rule.get('min_keep', 0)) }}</td>
-                    <td style="color: var(--text-muted);">
-                        {% if rule.get('sort_order') == 'newest_added' or rule.get('sort_order') == 'newest_first' %}Newest Added
-                        {% elif rule.get('sort_order') == 'longest_seeding' %}Longest Seeding
-                        {% elif rule.get('sort_order') == 'shortest_seeding' %}Shortest Seeding
-                        {% else %}Oldest Added{% endif %}
-                    </td>
-                    <td>{% if rule.delete_data %}<span class="status-badge-yes">YES</span>{% else %}<span class="status-badge-no">NO</span>{% endif %}</td>
-                    <td style="text-align: right;">
-                        <form action="{{ url_for('delete_rule', index=loop.index0) }}" method="POST" style="margin:0;">
-                            <button type="submit" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;">Delete</button>
-                        </form>
-                    </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">No automation rules configured yet.</td></tr>
-                {% endfor %}
-            </table>
+            <div class="table-wrapper">
+                <table>
+                    <tr>
+                        <th>Tag</th><th>Label</th><th>State</th><th>Metric</th><th>Threshold</th><th>Min Keep</th><th>Sorting Priority</th><th>Del Data?</th><th></th>
+                    </tr>
+                    {% for rule in rules %}
+                    <tr>
+                        <td><strong style="color: var(--accent);">{{ rule.group_id }}</strong></td>
+                        <td>{{ rule.label }}</td>
+                        <td><span style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">{{ rule.get('target_state', 'All') }}</span></td>
+                        <td>{{ 'Time Since Added' if rule.get('time_metric') == 'time_added' else 'Seeding Time' }}</td>
+                        <td>> {{ rule.max_hours }} hrs</td>
+                        <td>{{ rule.get('min_torrents', rule.get('min_keep', 0)) }}</td>
+                        <td style="color: var(--text-muted);">
+                            {% if rule.get('sort_order') == 'newest_added' or rule.get('sort_order') == 'newest_first' %}Newest Added
+                            {% elif rule.get('sort_order') == 'longest_seeding' %}Longest Seeding
+                            {% elif rule.get('sort_order') == 'shortest_seeding' %}Shortest Seeding
+                            {% else %}Oldest Added{% endif %}
+                        </td>
+                        <td>{% if rule.delete_data %}<span class="status-badge-yes">YES</span>{% else %}<span class="status-badge-no">NO</span>{% endif %}</td>
+                        <td style="text-align: right;">
+                            <form action="{{ url_for('delete_rule', index=loop.index0) }}" method="POST" style="margin:0;">
+                                <button type="submit" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">No automation rules configured yet.</td></tr>
+                    {% endfor %}
+                </table>
+            </div>
         </div>
 
         {% elif active_page == 'logs' %}
@@ -633,9 +639,7 @@ MASTER_TEMPLATE = """
             
             <div class="data-management-row">
                 <div class="data-actions">
-                    <a href="{{ url_for('export_settings') }}" class="btn btn-primary">Export Settings</a>
-
-					<a href="{{ url_for('export_settings') }}" class="btn btn-primary">Export All Data</a>
+                    <a href="{{ url_for('export_settings') }}" class="btn btn-primary">Export All Data</a>
                     
                     <form action="{{ url_for('import_settings') }}" method="POST" enctype="multipart/form-data" style="margin: 0; display: flex; gap: 8px;">
                         <input type="file" name="settings_file" accept=".json" required>
@@ -648,12 +652,12 @@ MASTER_TEMPLATE = """
                 <div>
                     <strong style="color: var(--danger); display: block; margin-bottom: 4px;">Danger Zone</strong>
                 </div>
-                <div style="display: flex; gap: 10px;">
-                    <form action="{{ url_for('factory_reset_settings') }}" method="POST" style="margin: 0;" onsubmit="return confirm('WARNING: Are you sure? This will wipe your App Settings and restore them to default. Your Rules and Tags will NOT be touched.');">
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <form action="{{ url_for('factory_reset_settings') }}" method="POST" style="margin: 0; flex-grow: 1;" onsubmit="return confirm('WARNING: Are you sure? This will wipe your App Settings and restore them to default. Your Rules and Tags will NOT be touched.');">
                         <button type="submit" class="btn btn-danger">Reset Settings</button>
                     </form>
                     
-                    <form action="{{ url_for('factory_reset_all') }}" method="POST" style="margin: 0;" onsubmit="return confirm('CRITICAL WARNING: Are you absolutely sure? This will completely WIPE ALL Settings, Rules, and Tracker Tags. This cannot be undone!');">
+                    <form action="{{ url_for('factory_reset_all') }}" method="POST" style="margin: 0; flex-grow: 1;" onsubmit="return confirm('CRITICAL WARNING: Are you absolutely sure? This will completely WIPE ALL Settings, Rules, and Tracker Tags. This cannot be undone!');">
                         <button type="submit" class="btn btn-danger-dark" title="Delete everything and start fresh">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
                                 <circle cx="9" cy="12" r="1"/>
@@ -694,15 +698,26 @@ MASTER_TEMPLATE = """
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const toggleBtn = document.getElementById('sidebarToggle');
+            const mobileOverlay = document.getElementById('mobileOverlay');
             
-            if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
                 document.body.classList.add('sidebar-collapsed');
             }
 
             if (toggleBtn) {
                 toggleBtn.addEventListener('click', () => {
-                    document.body.classList.toggle('sidebar-collapsed');
-                    localStorage.setItem('sidebarCollapsed', document.body.classList.contains('sidebar-collapsed'));
+                    if (window.innerWidth <= 768) {
+                        document.body.classList.toggle('mobile-sidebar-open');
+                    } else {
+                        document.body.classList.toggle('sidebar-collapsed');
+                        localStorage.setItem('sidebarCollapsed', document.body.classList.contains('sidebar-collapsed'));
+                    }
+                });
+            }
+            
+            if (mobileOverlay) {
+                mobileOverlay.addEventListener('click', () => {
+                    document.body.classList.remove('mobile-sidebar-open');
                 });
             }
         });
@@ -776,18 +791,14 @@ def save_settings():
 # --- DATA MANAGEMENT ROUTES ---
 @app.route('/export_settings')
 def export_settings():
-    # Bundle all three data sources into one dictionary
     backup_data = {
         'settings': load_json(SETTINGS_FILE, {}),
         'rules': load_json(RULES_FILE, []),
         'groups': load_json(GROUPS_FILE, {})
     }
-    
-    # Create an invisible file in memory to send to the browser
     mem_file = io.BytesIO()
     mem_file.write(json.dumps(backup_data, indent=4).encode('utf-8'))
     mem_file.seek(0)
-    
     return send_file(mem_file, as_attachment=True, download_name='delegatarr_backup.json', mimetype='application/json')
 
 @app.route('/import_settings', methods=['POST'])
@@ -797,16 +808,12 @@ def import_settings():
         if file.filename != '':
             try:
                 data = json.load(file)
-                
-                # Check if this is a new unified backup file containing all data
                 if 'settings' in data or 'rules' in data or 'groups' in data:
                     if 'settings' in data: save_json(SETTINGS_FILE, data['settings'])
                     if 'rules' in data: save_json(RULES_FILE, data['rules'])
                     if 'groups' in data: save_json(GROUPS_FILE, data['groups'])
                 else:
-                    # Fallback: If it's an old file that ONLY had settings
                     save_json(SETTINGS_FILE, data)
-                    
                 write_log("System: Full backup imported successfully.")
             except Exception as e:
                 write_log(f"System Error: Failed to import backup file. {e}")
@@ -826,7 +833,6 @@ def factory_reset_settings():
 
 @app.route('/factory_reset_all', methods=['POST'])
 def factory_reset_all():
-    # 1. Reset Settings
     default_settings = {
         'run_interval': 15,
         'log_retention_days': 30,
@@ -834,13 +840,8 @@ def factory_reset_all():
         'tracker_mode': 'all'
     }
     save_json(SETTINGS_FILE, default_settings)
-    
-    # 2. Wipe Rules
     save_json(RULES_FILE, [])
-    
-    # 3. Wipe Tags
     save_json(GROUPS_FILE, {})
-    
     write_log("System: CRITICAL - Full factory reset performed. All settings, rules, and tags have been wiped.")
     return redirect(url_for('settings_page'))
 # -----------------------------------
@@ -889,15 +890,11 @@ def run_now():
 
 @app.route('/favicon.ico')
 def favicon():
-    # 1. Check if the user has a custom override logo in their config folder
     if os.path.exists('/config/logo.png'):
         return send_from_directory('/config', 'logo.png', mimetype='image/png')
-    
-    # 2. If not, serve the baked-in Delegatarr logo
     base_dir = os.path.dirname(os.path.abspath(__file__))
     if os.path.exists(os.path.join(base_dir, 'logo.png')):
         return send_from_directory(base_dir, 'logo.png', mimetype='image/png')
-    
     return "", 404
 
 if __name__ == '__main__':
