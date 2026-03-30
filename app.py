@@ -11,7 +11,7 @@ app = Flask(__name__)
 scheduler = BackgroundScheduler()
 
 # --- VERSION CONTROL ---
-APP_VERSION = "2026.03.31"
+APP_VERSION = "2026.04.01"
 
 # --- INFRASTRUCTURE CONFIGURATION ---
 DELUGE_HOST = os.environ.get('DELUGE_HOST', '')
@@ -142,11 +142,12 @@ def get_dashboard_data():
         print(f"Deluge Error: {e}")
         return {}, []
 
-def process_torrents():
+def process_torrents(run_type="Scheduled"):
     groups = load_json(GROUPS_FILE, {})
     rules = load_json(RULES_FILE, [])
     
     if not rules or not groups:
+        write_log(f"{run_type} Engine Run: Skipped. No tags or rules are configured yet.")
         return
 
     try:
@@ -156,6 +157,8 @@ def process_torrents():
         current_time = time.time()
         settings = get_settings()
         tracker_mode = settings.get('tracker_mode', 'all')
+        
+        removed_count = 0  # Keep track of how many we remove this run
         
         for rule in rules:
             target_group = rule['group_id']
@@ -229,6 +232,13 @@ def process_torrents():
                 if t['trigger_value'] >= float(rule['max_hours']):
                     write_log(f"Rule Matched! Removed: '{t['name']}' (Tag: {target_group}, State: {target_state}, Metric: {time_metric}, Delete Data: {rule['delete_data']})")
                     client.call('core.remove_torrent', t['id'], rule['delete_data'])
+                    removed_count += 1  # Increment our counter
+        
+        # Log the final heartbeat result of the run
+        if removed_count == 0:
+            write_log(f"{run_type} Engine Run: Checked Deluge, no torrents met removal criteria.")
+        else:
+            write_log(f"{run_type} Engine Run: Completed. Successfully removed {removed_count} torrent(s).")
                     
     except Exception as e:
         write_log(f"Background Task Error: {e}")
@@ -884,7 +894,7 @@ def delete_rule(index):
 
 @app.route('/run_now', methods=['POST'])
 def run_now():
-    process_torrents()
+    process_torrents(run_type="Manual")
     return_url = request.form.get('return_url', url_for('trackers'))
     return redirect(return_url)
 
