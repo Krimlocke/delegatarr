@@ -11,7 +11,7 @@ app = Flask(__name__)
 scheduler = BackgroundScheduler()
 
 # --- VERSION CONTROL ---
-APP_VERSION = "2026.03.30"
+APP_VERSION = "2026.03.31"
 
 # --- INFRASTRUCTURE CONFIGURATION ---
 DELUGE_HOST = os.environ.get('DELUGE_HOST', '192.168.50.123')
@@ -344,10 +344,49 @@ MASTER_TEMPLATE = """
         
         .data-management-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; }
         .data-actions { display: flex; gap: 10px; align-items: center; }
-    </style>
+    
+	/* MOBILE OVERLAY BACKGROUND */
+        .mobile-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 990; backdrop-filter: blur(2px); }
+
+        /* RESPONSIVE DESIGN FOR MOBILE DEVICES */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            
+            /* 1. Sidebar becomes a sliding drawer */
+            .sidebar { position: fixed; top: 0; bottom: 0; left: -260px; width: 260px !important; box-shadow: 4px 0 15px rgba(0,0,0,0.5); z-index: 1000; transition: left 0.3s ease; }
+            body.mobile-sidebar-open .sidebar { left: 0; }
+            body.mobile-sidebar-open .mobile-overlay { display: block; }
+            
+            /* Show text on mobile sidebar */
+            body.sidebar-collapsed .nav-text, body.sidebar-collapsed .brand-text, body.sidebar-collapsed .version-tag { display: block !important; }
+            body.sidebar-collapsed .nav-link { justify-content: flex-start; padding: 12px 16px; }
+            body.sidebar-collapsed .nav-icon { margin-right: 12px; }
+            body.sidebar-collapsed .brand { justify-content: flex-start; padding: 20px 15px; }
+            
+            /* 2. Main Content Spacing */
+            .main-content { padding: 0 15px 30px 15px; width: 100%; }
+            .top-header { padding: 15px 0; margin-bottom: 10px; }
+            .page-header { font-size: 22px; }
+            .card { padding: 15px; }
+            
+            /* 3. Make Tables Swipeable */
+            table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+            
+            /* 4. Stack Forms & Buttons vertically for thumbs */
+            .form-row { flex-direction: column; align-items: stretch; gap: 10px; }
+            .form-row input, .form-row select, .form-row button, .form-row label { width: 100% !important; margin-left: 0 !important; }
+            
+            .data-management-row, .data-actions { flex-direction: column; width: 100%; align-items: stretch; }
+            .data-actions form { display: flex; flex-direction: column; width: 100%; gap: 10px; }
+            .btn { width: 100%; justify-content: center; }
+            #trackerFilter, .tag-input { width: 100% !important; }
+        }
+	</style>
+	
+	
 </head>
 <body>
-    
+    <div class="mobile-overlay" id="mobileOverlay"></div>
     <div class="sidebar" id="sidebar">
         <div class="brand">
             <img src="{{ url_for('favicon') }}?v={{ version }}" class="brand-logo" alt="Logo">
@@ -433,25 +472,37 @@ MASTER_TEMPLATE = """
             </form>
         </div>
         <script>
-            function filterTrackers() {
-                const filter = document.getElementById('trackerFilter').value;
-                localStorage.setItem('trackerFilterPref', filter);
-                const rows = document.querySelectorAll('.tracker-row');
-                rows.forEach(row => {
-                    const input = row.querySelector('.tag-input');
-                    const isTagged = input.value.trim() !== '';
-                    if (filter === 'all') row.style.display = '';
-                    else if (filter === 'tagged' && isTagged) row.style.display = '';
-                    else if (filter === 'untagged' && !isTagged) row.style.display = '';
-                    else row.style.display = 'none';
+        document.addEventListener('DOMContentLoaded', () => {
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const mobileOverlay = document.getElementById('mobileOverlay');
+            
+            // Only auto-collapse on desktop
+            if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
+                document.body.classList.add('sidebar-collapsed');
+            }
+
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    if (window.innerWidth <= 768) {
+                        // On mobile: Slide sidebar out
+                        document.body.classList.toggle('mobile-sidebar-open');
+                    } else {
+                        // On desktop: Shrink sidebar
+                        document.body.classList.toggle('sidebar-collapsed');
+                        localStorage.setItem('sidebarCollapsed', document.body.classList.contains('sidebar-collapsed'));
+                    }
                 });
             }
-            document.addEventListener('DOMContentLoaded', () => {
-                const savedFilter = localStorage.getItem('trackerFilterPref');
-                if (savedFilter) { document.getElementById('trackerFilter').value = savedFilter; }
-                filterTrackers();
-            });
+            
+            // Close sidebar if clicking the dark overlay on mobile
+            if (mobileOverlay) {
+                mobileOverlay.addEventListener('click', () => {
+                    document.body.classList.remove('mobile-sidebar-open');
+                });
+            }
+        });
         </script>
+
 
         {% elif active_page == 'rules' %}
         <div class="card">
