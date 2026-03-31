@@ -269,9 +269,9 @@ MASTER_TEMPLATE = """
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-main: #0f172a; var(--bg-sidebar): #1e293b; var(--bg-card): #1e293b; var(--bg-input): #0f172a;
-            --text-main: #f8fafc; var(--text-muted): #94a3b8; var(--accent): #6366f1; var(--accent-hover): #4f46e5;
-            --border-color: #334155; var(--danger): #ef4444; var(--danger-hover): #dc2626; var(--success): #10b981;
+            --bg-main: #0f172a; --bg-sidebar: #1e293b; --bg-card: #1e293b; --bg-input: #0f172a;
+            --text-main: #f8fafc; --text-muted: #94a3b8; --accent: #6366f1; --accent-hover: #4f46e5;
+            --border-color: #334155; --danger: #ef4444; --danger-hover: #dc2626; --success: #10b981;
         }
         * { box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; margin: 0; background-color: var(--bg-main); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
