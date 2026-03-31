@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import urllib.request
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file
 from deluge_client import DelugeRPCClient
@@ -82,6 +83,17 @@ def cleanup_logs():
             f.writelines(valid_lines)
     except Exception as e:
         print(f"Log cleanup error: {e}")
+
+def download_default_logo():
+    logo_path = '/config/logo.png'
+    logo_url = 'https://raw.githubusercontent.com/Krimlocke/delegatarr/refs/heads/main/logo.png'
+    if not os.path.exists(logo_path):
+        try:
+            write_log("System: Logo missing from /config. Downloading default from GitHub...")
+            urllib.request.urlretrieve(logo_url, logo_path)
+            write_log("System: Default logo downloaded successfully.")
+        except Exception as e:
+            write_log(f"System Error: Failed to download default logo: {e}")
 
 def get_deluge_credentials():
     user = DELUGE_USER
@@ -610,7 +622,7 @@ MASTER_TEMPLATE = """
                 
                 <div class="settings-group">
                     <label class="settings-label">Engine Run Interval (Minutes)</label>
-                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">How often should Delegatarr check Deluge for rules?</p>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">How often should Delegatarr run in the background to check the rules?</p>
                     <input type="number" name="run_interval" value="{{ app_settings.get('run_interval', 15) }}" min="1" required style="width: 150px;">
                 </div>
                 
@@ -629,10 +641,10 @@ MASTER_TEMPLATE = """
                 
                 <div class="settings-group">
                     <label class="settings-label">Tracker Reading Mode</label>
-                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Should Delegatarr read all trackers attached to a torrent, or just the primary (top) one?</p>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Should Delegatarr read all trackers attached to a torrent, or just the primary tracker?</p>
                     <select name="tracker_mode" style="width: 250px;">
                         <option value="all" {% if app_settings.get('tracker_mode', 'all') == 'all' %}selected{% endif %}>All Trackers</option>
-                        <option value="top" {% if app_settings.get('tracker_mode', 'all') == 'top' %}selected{% endif %}>Top Tracker</option>
+                        <option value="top" {% if app_settings.get('tracker_mode', 'all') == 'top' %}selected{% endif %}>Primary Tracker</option>
                     </select>
                 </div>
                 
@@ -908,6 +920,9 @@ def favicon():
     return "", 404
 
 if __name__ == '__main__':
+    # Try to grab the default logo if missing when app starts up!
+    download_default_logo()
+    
     boot_settings = get_settings()
     boot_interval = int(boot_settings.get('run_interval', 15))
     
