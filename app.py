@@ -407,9 +407,15 @@ MASTER_TEMPLATE = """
             .btn { width: 100%; justify-content: center; }
             #trackerFilter, .tag-input { width: 100% !important; }
         }
-    </style>
+</style>
 </head>
 <body>
+    <script>
+        /* Force collapse BEFORE the browser paints the screen */
+        if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
+            document.body.classList.add('sidebar-collapsed');
+        }
+    </script>
     
     <div class="mobile-overlay" id="mobileOverlay"></div>
 
@@ -722,10 +728,6 @@ MASTER_TEMPLATE = """
             const toggleBtn = document.getElementById('sidebarToggle');
             const mobileOverlay = document.getElementById('mobileOverlay');
             
-            if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
-                document.body.classList.add('sidebar-collapsed');
-            }
-
             if (toggleBtn) {
                 toggleBtn.addEventListener('click', () => {
                     if (window.innerWidth <= 768) {
