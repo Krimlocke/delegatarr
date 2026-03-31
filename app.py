@@ -372,14 +372,14 @@ MASTER_TEMPLATE = """
         .data-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
         
         /* MOBILE OVERLAY BACKGROUND */
-        .mobile-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 990; backdrop-filter: blur(2px); }
+        .mobile-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 1990; backdrop-filter: blur(2px); }
 
         /* RESPONSIVE DESIGN FOR MOBILE DEVICES */
         @media (max-width: 768px) {
             body { flex-direction: column; }
             
             /* Sidebar becomes a sliding drawer */
-            .sidebar { position: fixed; top: 0; bottom: 0; left: -260px; width: 260px !important; box-shadow: 4px 0 15px rgba(0,0,0,0.5); z-index: 1000; transition: left 0.3s ease; }
+            .sidebar { position: fixed; top: 0; bottom: 0; left: -260px; width: 260px !important; box-shadow: 4px 0 15px rgba(0,0,0,0.5); z-index: 2000; transition: left 0.3s ease; }
             body.mobile-sidebar-open .sidebar { left: 0; }
             body.mobile-sidebar-open .mobile-overlay { display: block; }
             
