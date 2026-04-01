@@ -267,12 +267,15 @@ def process_torrents(run_type="Scheduled"):
             for t in candidates_for_removal:
                 if t['trigger_value'] >= rule_max_hours:
                     try:
-                        client.call('core.remove_torrent', t['id'], rule['delete_data'])
-                        write_log(f"Rule Matched! Removed: '{t['name']}' (Tag: {target_group}, State: {target_state}, Metric: {time_metric}, Delete Data: {rule['delete_data']})")
+                        # SAFELY fallback to False if delete_data is missing from a legacy rule
+                        should_delete_data = rule.get('delete_data', False)
+                        client.call('core.remove_torrent', t['id'], should_delete_data)
+                        write_log(f"Rule Matched! Removed: '{t['name']}' (Tag: {target_group}, State: {target_state}, Metric: {time_metric}, Delete Data: {should_delete_data})")
                         removed_count += 1
                     except Exception as del_err:
                         write_log(f"Failed to remove '{t['name']}': {del_err}")
         
+        # Log the final heartbeat result of the run
         if removed_count == 0:
             write_log(f"{run_type} Engine Run: Checked Deluge, no torrents met removal criteria.")
         else:
@@ -620,11 +623,11 @@ MASTER_TEMPLATE = """
                     </tr>
                     {% for rule in rules %}
                     <tr>
-                        <td><strong style="color: var(--accent);">{{ rule.group_id }}</strong></td>
-                        <td>{{ rule.label }}</td>
+                        <td><strong style="color: var(--accent);">{{ rule.get('group_id') }}</strong></td>
+                        <td>{{ rule.get('label') }}</td>
                         <td><span style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">{{ rule.get('target_state', 'All') }}</span></td>
                         <td>{{ 'Time Since Added' if rule.get('time_metric') == 'time_added' else 'Seeding Time' }}</td>
-                        <td>> {{ rule.max_hours }} hrs</td>
+                        <td>> {{ rule.get('max_hours') }} hrs</td>
                         <td>{{ rule.get('min_torrents', rule.get('min_keep', 0)) }}</td>
                         <td style="color: var(--text-muted);">
                             {% if rule.get('sort_order') == 'newest_added' or rule.get('sort_order') == 'newest_first' %}Newest Added
@@ -632,7 +635,7 @@ MASTER_TEMPLATE = """
                             {% elif rule.get('sort_order') == 'shortest_seeding' %}Shortest Seeding
                             {% else %}Oldest Added{% endif %}
                         </td>
-                        <td>{% if rule.delete_data %}<span class="status-badge-yes">YES</span>{% else %}<span class="status-badge-no">NO</span>{% endif %}</td>
+                        <td>{% if rule.get('delete_data') %}<span class="status-badge-yes">YES</span>{% else %}<span class="status-badge-no">NO</span>{% endif %}</td>
                         <td style="text-align: right;">
                             <form action="{{ url_for('delete_rule', index=loop.index0) }}" method="POST" style="margin:0;">
                                 <button type="submit" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;">Delete</button>
