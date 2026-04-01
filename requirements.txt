@@ -1,3 +1,4 @@
 deluge-client
 Flask
 apscheduler
+waitress
