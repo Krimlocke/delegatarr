@@ -16,7 +16,7 @@ app = Flask(__name__)
 scheduler = BackgroundScheduler()
 
 # --- VERSION CONTROL ---
-APP_VERSION = "2026.04.02"
+APP_VERSION = "2026.04.03"
 
 # --- INFRASTRUCTURE CONFIGURATION ---
 DELUGE_HOST = os.environ.get('DELUGE_HOST', '')
@@ -359,6 +359,7 @@ MASTER_TEMPLATE = """
         body.sidebar-collapsed .version-tag { display: none !important; }
         body.sidebar-collapsed .nav-link { justify-content: center; padding: 12px 0; }
         body.sidebar-collapsed .nav-icon { margin-right: 0; }
+        body.sidebar-collapsed .nav-action { width: 42px; height: 42px; padding: 0; margin-left: auto; margin-right: auto; border-radius: 8px; }
         
         .main-content { flex-grow: 1; padding: 0 40px 40px 40px; overflow-y: auto; position: relative; }
         
@@ -510,10 +511,10 @@ MASTER_TEMPLATE = """
             <form action="{{ url_for('update_groups') }}" method="POST">
                 <div class="card-header">
                     <h3 class="card-title">Assign Tags to Trackers</h3>
-                    <select id="trackerFilter" onchange="filterTrackers()" style="width: 200px; padding: 6px 10px;">
-                        <option value="all">Show All Trackers</option>
+                    <select id="trackerFilter" onchange="filterTrackers()" style="width: 220px; padding: 6px 10px;">
+                        <option value="all">Show All Current Trackers</option>
                         <option value="untagged">Show Not Tagged</option>
-                        <option value="tagged">Show Tagged</option>
+                        <option value="tagged">Show Current Tagged</option>
                     </select>
                 </div>
                 
@@ -986,11 +987,18 @@ def manifest():
         "display": "standalone",
         "background_color": "#0f172a",
         "theme_color": "#0f172a",
-        "icons": [{
-            "src": url_for('favicon'),
-            "sizes": "192x192 512x512",
-            "type": "image/png"
-        }]
+        "icons": [
+            {
+                "src": url_for('favicon'),
+                "sizes": "192x192",
+                "type": "image/png"
+            },
+            {
+                "src": url_for('favicon'),
+                "sizes": "512x512",
+                "type": "image/png"
+            }
+        ]
     }
     return app.response_class(
         response=json.dumps(manifest_data),
