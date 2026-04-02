@@ -281,8 +281,14 @@ def process_torrents(run_type="Scheduled"):
         else:
             write_log(f"{run_type} Engine Run: Completed. Successfully removed {removed_count} torrent(s).")
                     
+    except ConnectionResetError:
+        write_log("Engine Run: Skipped. Deluge actively refused the connection (Deluge possibly restarting).")
     except Exception as e:
-        write_log(f"Background Task Error: {e}")
+        # Check if it's the specific SSL/EOF error
+        if "EOF" in str(e) or "SSL" in str(e):
+            write_log("Engine Run: Skipped. Lost connection to Deluge (Daemon likely offline).")
+        else:
+            write_log(f"Background Task Error: {e}")
     finally:
         if client and client.connected:
             client.disconnect()
