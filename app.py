@@ -2,21 +2,21 @@ import os
 import json
 import time
 import urllib.request
+import threading
+import io
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file
 from deluge_client import DelugeRPCClient
 from apscheduler.schedulers.background import BackgroundScheduler
 from waitress import serve
-import io
 
 # --- INITIALIZE ENVIRONMENT ---
-os.makedirs('/config', exist_ok=True)
-
 app = Flask(__name__)
 scheduler = BackgroundScheduler()
 
 # --- VERSION CONTROL ---
-APP_VERSION = "2026.04.03"
+APP_VERSION = "2026.04.04"
 
 # --- INFRASTRUCTURE CONFIGURATION ---
 DELUGE_HOST = os.environ.get('DELUGE_HOST', '')
@@ -32,79 +32,6 @@ SETTINGS_FILE = '/config/settings.json'
 LOG_FILE = '/config/delegatarr.log'
 
 # --- HELPER FUNCTIONS ---
-def load_json(filepath, default_val):
-    if os.path.exists(filepath):
-        try:
-            with open(filepath, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            write_log(f"System Warning: {filepath} is corrupted or empty. Loading defaults.")
-            return default_val
-    return default_val
-
-def save_json(filepath, data):
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=4)
-
-def get_settings():
-    return load_json(SETTINGS_FILE, {
-        'run_interval': 15, 
-        'log_retention_days': 30, 
-        'timezone': 'UTC',
-        'tracker_mode': 'all'
-    })
-
-def apply_timezone(tz_string):
-    os.environ['TZ'] = tz_string
-    if hasattr(time, 'tzset'):
-        time.tzset()
-
-def write_log(message):
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_entry = f"[{timestamp}] {message}"
-    print(log_entry)
-    try:
-        with open(LOG_FILE, 'a') as f:
-            f.write(log_entry + "\n")
-    except Exception as e:
-        print(f"Failed to write to log: {e}")
-
-def cleanup_logs():
-    if not os.path.exists(LOG_FILE):
-        return
-    write_log("Running automated log cleanup...")
-    settings = get_settings()
-    cutoff_date = datetime.now() - timedelta(days=int(settings.get('log_retention_days', 30)))
-    valid_lines = []
-    try:
-        with open(LOG_FILE, 'r') as f:
-            lines = f.readlines()
-        for line in lines:
-            try:
-                time_str = line[1:20]
-                log_date = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
-                if log_date >= cutoff_date:
-                    valid_lines.append(line)
-            except ValueError:
-                valid_lines.append(line)
-        with open(LOG_FILE, 'w') as f:
-            f.writelines(valid_lines)
-    except Exception as e:
-        print(f"Log cleanup error: {e}")
-
-def download_default_logo():
-    logo_path = '/config/logo.png'
-    logo_url = 'https://raw.githubusercontent.com/Krimlocke/delegatarr/refs/heads/main/logo.png'
-    if not os.path.exists(logo_path):
-        try:
-            write_log("System: Logo missing. Downloading default from GitHub...")
-            req = urllib.request.Request(logo_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=5) as response, open(logo_path, 'wb') as out_file:
-                out_file.write(response.read())
-            write_log("System: Default logo downloaded successfully.")
-        except Exception as e:
-            write_log(f"System Error: Failed to download default logo: {e}")
-
 def get_deluge_credentials():
     user = DELUGE_USER
     password = DELUGE_PASS
@@ -136,11 +63,120 @@ def get_deluge_client():
     client.connect()
     return client
 
-def get_dashboard_data():
+@contextmanager
+def deluge_session():
+    """Context manager for safe Deluge RPC connections."""
     client = None
     try:
         client = get_deluge_client()
-        torrents = client.call('core.get_torrents_status', {}, ['trackers', 'label'])
+        yield client
+    finally:
+        if client and client.connected:
+            client.disconnect()
+
+def wait_for_deluge(max_retries=12, delay_seconds=5):
+    """Polls Deluge on startup to prevent cold-boot connection errors."""
+    if not DELUGE_HOST:
+        write_log("System: DELUGE_HOST not configured, skipping connection wait.")
+        return False
+
+    write_log("System: Waiting for Deluge daemon to become available...")
+    for attempt in range(1, max_retries + 1):
+        try:
+            with deluge_session() as client:
+                client.call('daemon.info')
+            write_log(f"System: Deluge connection established. (Attempt {attempt}/{max_retries})")
+            return True
+        except Exception:
+            write_log(f"System: Deluge not ready yet (Attempt {attempt}/{max_retries}). Retrying in {delay_seconds}s...")
+            time.sleep(delay_seconds)
+            
+    write_log("System Warning: Deluge did not respond in time. Proceeding with startup, but scheduled runs may fail.")
+    return False
+
+def load_json(filepath, default_val):
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            write_log(f"System Warning: {filepath} is corrupted or empty. Loading defaults.")
+            return default_val
+    return default_val
+
+def save_json(filepath, data):
+    tmp = filepath + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(data, f, indent=4)
+    os.replace(tmp, filepath)
+
+def get_settings():
+    return load_json(SETTINGS_FILE, {
+        'run_interval': 15, 
+        'log_retention_days': 30, 
+        'timezone': 'UTC',
+        'tracker_mode': 'all',
+        'dry_run': False
+    })
+
+def apply_timezone(tz_string):
+    os.environ['TZ'] = tz_string
+    # Note: tzset() is Unix-only; silent no-op on Windows
+    if hasattr(time, 'tzset'):
+        time.tzset()
+
+def write_log(message):
+    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_entry = f"[{timestamp}] {message}"
+    print(log_entry)
+    try:
+        with open(LOG_FILE, 'a') as f:
+            f.write(log_entry + "\n")
+    except Exception as e:
+        print(f"Failed to write to log: {e}")
+
+def cleanup_logs():
+    if not os.path.exists(LOG_FILE):
+        return
+    settings = get_settings()
+    cutoff_date = datetime.now() - timedelta(days=int(settings.get('log_retention_days', 30)))
+    valid_lines = []
+    try:
+        with open(LOG_FILE, 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            try:
+                time_str = line[1:20]
+                log_date = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
+                if log_date >= cutoff_date:
+                    valid_lines.append(line)
+            except ValueError:
+                valid_lines.append(line)
+        with open(LOG_FILE, 'w') as f:
+            f.writelines(valid_lines)
+        write_log("System: Automated log cleanup completed.")
+    except Exception as e:
+        print(f"Log cleanup error: {e}")
+
+def download_default_logo():
+    logo_path = '/config/logo.png'
+    logo_url = 'https://raw.githubusercontent.com/Krimlocke/delegatarr/refs/heads/main/logo.png'
+    if not os.path.exists(logo_path):
+        try:
+            write_log("System: Logo missing. Downloading default from GitHub...")
+            req = urllib.request.Request(logo_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=5) as response, open(logo_path, 'wb') as out_file:
+                out_file.write(response.read())
+            write_log("System: Default logo downloaded successfully.")
+        except Exception as e:
+            write_log(f"System Error: Failed to download default logo: {e}")
+
+def get_dashboard_data():
+    try:
+        with deluge_session() as client:
+            torrents = client.call('core.get_torrents_status', {}, ['trackers', 'label'])
+            
         summary = {}
         labels = set()
         settings = get_settings()
@@ -164,9 +200,6 @@ def get_dashboard_data():
     except Exception as e:
         print(f"Deluge Error: {e}")
         return {}, []
-    finally:
-        if client and client.connected:
-            client.disconnect()
 
 def process_torrents(run_type="Scheduled"):
     groups = load_json(GROUPS_FILE, {})
@@ -176,16 +209,20 @@ def process_torrents(run_type="Scheduled"):
         write_log(f"{run_type} Engine Run: Skipped. No tags or rules are configured yet.")
         return
 
-    client = None
     try:
-        client = get_deluge_client()
-        fields = ['name', 'trackers', 'label', 'seeding_time', 'time_added', 'state']
-        torrents = client.call('core.get_torrents_status', {}, fields)
+        # STEP 1: Fetch data and close connection immediately
+        with deluge_session() as client:
+            fields = ['name', 'trackers', 'label', 'seeding_time', 'time_added', 'state']
+            torrents = client.call('core.get_torrents_status', {}, fields)
+            
+        # STEP 2: Process locally (No active RPC connection)
         current_time = time.time()
         settings = get_settings()
         tracker_mode = settings.get('tracker_mode', 'all')
+        is_dry_run = settings.get('dry_run', False)
         
         removed_count = 0  
+        torrents_to_remove = []
         
         for rule in rules:
             target_group = rule.get('group_id', '')
@@ -251,13 +288,13 @@ def process_torrents(run_type="Scheduled"):
                 continue
                 
             if sort_order == 'oldest_added':
-                matching_torrents.sort(key=lambda x: x['time_added'], reverse=True) 
+                matching_torrents.sort(key=lambda x: x['time_added'], reverse=False) 
             elif sort_order == 'newest_added':
-                matching_torrents.sort(key=lambda x: x['time_added'], reverse=False)
+                matching_torrents.sort(key=lambda x: x['time_added'], reverse=True)
             elif sort_order == 'longest_seeding':
-                matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=False)
-            elif sort_order == 'shortest_seeding':
                 matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=True)
+            elif sort_order == 'shortest_seeding':
+                matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=False)
                 
             if min_torrents > 0:
                 candidates_for_removal = matching_torrents[min_torrents:]
@@ -266,32 +303,48 @@ def process_torrents(run_type="Scheduled"):
                 
             for t in candidates_for_removal:
                 if t['trigger_value'] >= rule_max_hours:
-                    try:
-                        # SAFELY fallback to False if delete_data is missing from a legacy rule
-                        should_delete_data = rule.get('delete_data', False)
-                        client.call('core.remove_torrent', t['id'], should_delete_data)
-                        write_log(f"Rule Matched! Removed: '{t['name']}' (Tag: {target_group}, State: {target_state}, Metric: {time_metric}, Delete Data: {should_delete_data})")
-                        removed_count += 1
-                    except Exception as del_err:
-                        write_log(f"Failed to remove '{t['name']}': {del_err}")
+                    should_delete_data = rule.get('delete_data', False)
+                    # Queue it up instead of executing immediately
+                    torrents_to_remove.append({
+                        'id': t['id'],
+                        'name': t['name'],
+                        'tag': target_group,
+                        'state': target_state,
+                        'metric': time_metric,
+                        'delete_data': should_delete_data
+                    })
         
+        # STEP 3: Execute Deletions (Re-open connection only if needed)
+        if torrents_to_remove:
+            if is_dry_run:
+                for t in torrents_to_remove:
+                    write_log(f"[DRY RUN] Would have removed: '{t['name']}' (Tag: {t['tag']}, State: {t['state']}, Metric: {t['metric']}, Delete Data: {t['delete_data']})")
+                    removed_count += 1
+            else:
+                with deluge_session() as client:
+                    for t in torrents_to_remove:
+                        try:
+                            client.call('core.remove_torrent', t['id'], t['delete_data'])
+                            write_log(f"Rule Matched! Removed: '{t['name']}' (Tag: {t['tag']}, State: {t['state']}, Metric: {t['metric']}, Delete Data: {t['delete_data']})")
+                            removed_count += 1
+                        except Exception as del_err:
+                            write_log(f"Failed to remove '{t['name']}': {del_err}")
+
         # Log the final heartbeat result of the run
-        if removed_count == 0:
+        if not torrents_to_remove:
             write_log(f"{run_type} Engine Run: Checked Deluge, no torrents met removal criteria.")
         else:
-            write_log(f"{run_type} Engine Run: Completed. Successfully removed {removed_count} torrent(s).")
+            mode_text = "[DRY RUN] " if is_dry_run else ""
+            action_text = "identified" if is_dry_run else "removed"
+            write_log(f"{mode_text}{run_type} Engine Run: Completed. Successfully {action_text} {removed_count} torrent(s).")
                     
     except ConnectionResetError:
         write_log("Engine Run: Skipped. Deluge actively refused the connection (Deluge possibly restarting).")
     except Exception as e:
-        # Check if it's the specific SSL/EOF error
         if "EOF" in str(e) or "SSL" in str(e):
             write_log("Engine Run: Skipped. Lost connection to Deluge (Daemon likely offline).")
         else:
             write_log(f"Background Task Error: {e}")
-    finally:
-        if client and client.connected:
-            client.disconnect()
 
 # --- HTML TEMPLATE ---
 MASTER_TEMPLATE = """
@@ -535,7 +588,7 @@ MASTER_TEMPLATE = """
                         <tr class="tracker-row">
                             <td style="font-weight: 500;">{{ tracker }}</td>
                             <td>{{ count }}</td>
-                            <td><input type="text" class="tag-input" name="{{ tracker }}" value="{{ groups.get(tracker, '') }}" placeholder="Assign Tag..." style="width: 200px;"></td>
+                            <td><input type="text" class="tag-input" name="{{ tracker }}" value="{{ groups.get(tracker, '') }}" placeholder="Tag (or 'REMOVE')" style="width: 200px;"></td>
                         </tr>
                         {% else %}
                         <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 30px;">No active torrents found in Deluge.</td></tr>
@@ -696,6 +749,14 @@ MASTER_TEMPLATE = """
                     </select>
                 </div>
                 
+                <div class="settings-group">
+                    <label class="settings-label" style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" name="dry_run" value="yes" {% if app_settings.get('dry_run') %}checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--accent);">
+                        Enable Dry Run Mode
+                    </label>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 5px; margin-bottom: 10px;">If enabled, Delegatarr will only log the torrents it WOULD remove, without actually deleting them from Deluge.</p>
+                </div>
+                
                 <div style="border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 10px;">
                     <button type="submit" class="btn btn-primary">Save Changes</button>
                 </div>
@@ -853,12 +914,14 @@ def save_settings():
         
     new_tz = request.form.get('timezone', 'UTC')
     new_tracker_mode = request.form.get('tracker_mode', 'all')
+    new_dry_run = 'dry_run' in request.form
     
     settings_data = {
         'run_interval': new_interval,
         'log_retention_days': new_retention,
         'timezone': new_tz,
-        'tracker_mode': new_tracker_mode
+        'tracker_mode': new_tracker_mode,
+        'dry_run': new_dry_run
     }
     save_json(SETTINGS_FILE, settings_data)
     
@@ -866,7 +929,8 @@ def save_settings():
     
     try:
         scheduler.reschedule_job('main_engine_job', trigger='interval', minutes=new_interval)
-        write_log(f"System: Settings updated. Interval: {new_interval}m, TZ: {new_tz}, Tracker Mode: {new_tracker_mode}.")
+        dry_run_state = "ON" if new_dry_run else "OFF"
+        write_log(f"System: Settings updated. Interval: {new_interval}m, TZ: {new_tz}, Tracker Mode: {new_tracker_mode}, Dry Run: {dry_run_state}.")
     except Exception as e:
         print(f"Failed to reschedule job: {e}")
 
@@ -891,7 +955,6 @@ def import_settings():
         file = request.files['settings_file']
         if file.filename != '':
             try:
-                # FIXED: Correctly decodes the uploaded byte stream into JSON text
                 data = json.loads(file.read().decode('utf-8'))
                 if 'settings' in data or 'rules' in data or 'groups' in data:
                     if 'settings' in data: save_json(SETTINGS_FILE, data['settings'])
@@ -910,7 +973,8 @@ def factory_reset_settings():
         'run_interval': 15,
         'log_retention_days': 30,
         'timezone': 'UTC',
-        'tracker_mode': 'all'
+        'tracker_mode': 'all',
+        'dry_run': False
     }
     save_json(SETTINGS_FILE, default_settings)
     write_log("System: Factory reset performed on application settings only.")
@@ -922,7 +986,8 @@ def factory_reset_all():
         'run_interval': 15,
         'log_retention_days': 30,
         'timezone': 'UTC',
-        'tracker_mode': 'all'
+        'tracker_mode': 'all',
+        'dry_run': False
     }
     save_json(SETTINGS_FILE, default_settings)
     save_json(RULES_FILE, [])
@@ -934,10 +999,17 @@ def factory_reset_all():
 def update_groups():
     groups = load_json(GROUPS_FILE, {})
     for tracker, group_id in request.form.items():
-        if group_id.strip():
-            groups[tracker] = group_id.strip()
-        elif tracker in groups and not group_id.strip():
-            del groups[tracker]
+        clean_val = group_id.strip()
+        
+        if not clean_val:
+            continue
+            
+        if clean_val.upper() == 'REMOVE':
+            if tracker in groups:
+                del groups[tracker]
+        else:
+            groups[tracker] = clean_val
+            
     save_json(GROUPS_FILE, groups)
     return redirect(url_for('trackers'))
 
@@ -977,10 +1049,14 @@ def delete_rule(index):
         save_json(RULES_FILE, rules)
     return redirect(url_for('rules'))
 
+SAFE_RETURN_URLS = {'/trackers', '/rules', '/logs', '/settings'}
+
 @app.route('/run_now', methods=['POST'])
 def run_now():
     process_torrents(run_type="Manual")
-    return_url = request.form.get('return_url', url_for('trackers'))
+    return_url = request.form.get('return_url', '/trackers')
+    if return_url not in SAFE_RETURN_URLS:
+        return_url = '/trackers'
     return redirect(return_url)
 
 # --- PWA ROUTES ---
@@ -1038,7 +1114,9 @@ def favicon():
     return "", 404
 
 if __name__ == '__main__':
-    download_default_logo()
+    os.makedirs('/config', exist_ok=True)
+    
+    threading.Thread(target=download_default_logo, daemon=True).start()
     
     boot_settings = get_settings()
     boot_interval = int(boot_settings.get('run_interval', 15))
@@ -1047,6 +1125,8 @@ if __name__ == '__main__':
         apply_timezone(boot_settings['timezone'])
     elif 'TZ' in os.environ:
         apply_timezone(os.environ['TZ'])
+    
+    wait_for_deluge()
     
     scheduler.add_job(func=process_torrents, trigger="interval", minutes=boot_interval, id='main_engine_job')
     scheduler.add_job(func=cleanup_logs, trigger="interval", days=1)
