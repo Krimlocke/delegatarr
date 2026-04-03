@@ -422,7 +422,7 @@ MASTER_TEMPLATE = """
         
         .main-content { flex-grow: 1; padding: 0 40px 40px 40px; overflow-y: auto; position: relative; }
         
-        .top-header { display: flex; align-items: center; gap: 15px; padding: 25px 0; margin-bottom: 20px; position: relative; z-index: 1050; }
+        .top-header { display: flex; align-items: center; gap: 15px; padding: 20px 40px; margin: 0 -40px 20px -40px; position: sticky; top: 0; z-index: 1050; background-color: rgba(15, 23, 42, 0.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border-color); }
         .page-header { font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }
         
         .btn-toggle-sidebar { background: none; border: none; padding: 8px; cursor: pointer; color: var(--text-muted); border-radius: 6px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
@@ -487,7 +487,7 @@ MASTER_TEMPLATE = """
             
             /* Main Content Adjustments */
             .main-content { padding: 0 15px 30px 15px; width: 100%; }
-            .top-header { padding: 15px 0; margin-bottom: 10px; }
+            .top-header { padding: 15px; margin: 0 -15px 10px -15px; }
             .page-header { font-size: 22px; }
             .card { padding: 15px; }
             
@@ -752,7 +752,7 @@ MASTER_TEMPLATE = """
                 <div class="settings-group">
                     <label class="settings-label" style="display: flex; align-items: center; gap: 8px;">
                         <input type="checkbox" name="dry_run" value="yes" {% if app_settings.get('dry_run') %}checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        Enable Dry Run Mode
+                        Enable Dry Run
                     </label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 5px; margin-bottom: 10px;">If enabled, Delegatarr will only log the torrents it WOULD remove, without actually deleting them from Deluge.</p>
                 </div>
