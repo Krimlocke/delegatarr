@@ -183,8 +183,9 @@ def cleanup_logs():
         estimated_size = sum(len(l.encode('utf-8')) for l in valid_lines)
         if estimated_size > LOG_MAX_BYTES:
             write_log("System Warning: Log file exceeds 10MB cap. Truncating to most recent entries.")
-            while valid_lines and sum(len(l.encode('utf-8')) for l in valid_lines) > LOG_MAX_BYTES:
-                valid_lines.pop(0)
+            while valid_lines and estimated_size > LOG_MAX_BYTES:
+                popped_line = valid_lines.pop(0)
+                estimated_size -= len(popped_line.encode('utf-8'))
 
         with open(LOG_FILE, 'w') as f:
             f.writelines(valid_lines)
@@ -250,9 +251,9 @@ def validate_rule(form):
     group_id = form.get('group_id', '').strip()
     label = form.get('label', '').strip()
     try:
-        max_hours = float(form.get('max_hours', 0))
+        threshold_val = float(form.get('threshold_value', form.get('max_hours', 0)))
     except (ValueError, TypeError):
-        return "Threshold hours must be a valid number."
+        return "Threshold time must be a valid number."
     try:
         min_torrents = int(form.get('min_torrents', 0))
     except (ValueError, TypeError):
@@ -262,8 +263,8 @@ def validate_rule(form):
         return "Target Tag cannot be empty."
     if not label:
         return "Deluge Label cannot be empty."
-    if max_hours <= 0:
-        return "Threshold hours must be greater than 0."
+    if threshold_val <= 0:
+        return "Threshold time must be greater than 0."
     if min_torrents < 0:
         return "Min Keep cannot be negative."
     return None
@@ -307,10 +308,20 @@ def process_torrents(run_type="Scheduled"):
             except (ValueError, TypeError):
                 min_torrents = 0
 
+            # Dynamic threshold with fallback for legacy JSON config
             try:
-                rule_max_hours = float(rule.get('max_hours', 0))
+                threshold_val = float(rule.get('threshold_value', rule.get('max_hours', 0)))
             except (ValueError, TypeError):
-                rule_max_hours = 0.0
+                threshold_val = 0.0
+
+            threshold_unit = rule.get('threshold_unit', 'hours')
+
+            if threshold_unit == 'minutes':
+                rule_max_hours = threshold_val / 60.0
+            elif threshold_unit == 'days':
+                rule_max_hours = threshold_val * 24.0
+            else:
+                rule_max_hours = threshold_val
 
             sort_order = rule.get('sort_order', 'oldest_added')
             if sort_order == 'oldest_first': sort_order = 'oldest_added'
@@ -723,7 +734,13 @@ MASTER_TEMPLATE = """
                         <option value="time_paused">Time Paused ></option>
                     </select>
 
-                    <input type="number" name="max_hours" placeholder="Hours" step="any" style="width: 80px;" required>
+                    <input type="number" name="threshold_value" placeholder="Time" step="any" style="width: 80px;" required>
+                    <select name="threshold_unit" style="width: 100px;">
+                        <option value="minutes">Minutes</option>
+                        <option value="hours" selected>Hours</option>
+                        <option value="days">Days</option>
+                    </select>
+
                     <input type="number" name="min_torrents" placeholder="Min Keep" style="width: 90px;" value="0" required>
 
                     <select name="sort_order" style="width: 200px;">
@@ -758,7 +775,7 @@ MASTER_TEMPLATE = """
                             {% elif rule.get('time_metric') == 'time_paused' %}Time Paused
                             {% else %}Seeding Time{% endif %}
                         </td>
-                        <td>> {{ rule.get('max_hours') }} hrs</td>
+                        <td>> {{ rule.get('threshold_value', rule.get('max_hours', 0)) }} {{ rule.get('threshold_unit', 'hours') }}</td>
                         <td>{{ rule.get('min_torrents', rule.get('min_keep', 0)) }}</td>
                         <td style="color: var(--text-muted);">
                             {% if rule.get('sort_order') == 'newest_added' or rule.get('sort_order') == 'newest_first' %}Newest Added
@@ -1118,9 +1135,11 @@ def add_rule():
     rules_list = load_json(RULES_FILE, [])
 
     try:
-        max_hours = float(request.form.get('max_hours', 0))
+        threshold_value = float(request.form.get('threshold_value', 0))
     except (ValueError, TypeError):
-        max_hours = 0.0
+        threshold_value = 0.0
+
+    threshold_unit = request.form.get('threshold_unit', 'hours')
 
     try:
         min_torrents = int(request.form.get('min_torrents', 0))
@@ -1134,7 +1153,8 @@ def add_rule():
         'time_metric': request.form.get('time_metric', 'seeding_time'),
         'min_torrents': min_torrents,
         'sort_order': request.form.get('sort_order', 'oldest_added'),
-        'max_hours': max_hours,
+        'threshold_value': threshold_value,
+        'threshold_unit': threshold_unit,
         'delete_data': 'delete_data' in request.form
     }
     rules_list.append(new_rule)
