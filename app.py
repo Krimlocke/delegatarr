@@ -6,13 +6,29 @@ import threading
 import io
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file
+from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, flash
 from deluge_client import DelugeRPCClient
 from apscheduler.schedulers.background import BackgroundScheduler
 from waitress import serve
 
 # --- INITIALIZE ENVIRONMENT ---
+os.makedirs('/config', exist_ok=True)
+
 app = Flask(__name__)
+
+# Persistent Secret Key for Session Management
+SECRET_KEY_FILE = '/config/secret.key'
+if os.environ.get('SECRET_KEY'):
+    app.secret_key = os.environ.get('SECRET_KEY')
+else:
+    try:
+        with open(SECRET_KEY_FILE, 'rb') as f:
+            app.secret_key = f.read()
+    except FileNotFoundError:
+        app.secret_key = os.urandom(24)
+        with open(SECRET_KEY_FILE, 'wb') as f:
+            f.write(app.secret_key)
+
 scheduler = BackgroundScheduler()
 
 # --- VERSION CONTROL ---
@@ -30,6 +46,14 @@ GROUPS_FILE = '/config/groups.json'
 RULES_FILE = '/config/rules.json'
 SETTINGS_FILE = '/config/settings.json'
 LOG_FILE = '/config/delegatarr.log'
+LOG_DIR = '/config'
+LOG_MAX_BYTES = 10 * 1024 * 1024  # 10MB hard cap
+
+# --- ENGINE CONCURRENCY LOCK ---
+_engine_lock = threading.Lock()
+
+# --- SAFE REDIRECT URLS ---
+SAFE_RETURN_URLS = {'/trackers', '/rules', '/logs', '/settings'}
 
 # --- HELPER FUNCTIONS ---
 def get_deluge_credentials():
@@ -41,7 +65,7 @@ def get_deluge_credentials():
             with open(DELUGE_AUTH_FILE, 'r') as f:
                 for line in f:
                     line = line.strip()
-                    if not line or line.startswith('#'): 
+                    if not line or line.startswith('#'):
                         continue
                     parts = line.split(':')
                     if len(parts) >= 2:
@@ -52,7 +76,7 @@ def get_deluge_credentials():
         except Exception as e:
             print(f"Error reading auth file: {e}")
             write_log(f"System Error: Failed to parse auth file at {DELUGE_AUTH_FILE}")
-    
+
     if not user:
         user = 'localclient'
     return user, password
@@ -90,7 +114,7 @@ def wait_for_deluge(max_retries=12, delay_seconds=5):
         except Exception:
             write_log(f"System: Deluge not ready yet (Attempt {attempt}/{max_retries}). Retrying in {delay_seconds}s...")
             time.sleep(delay_seconds)
-            
+
     write_log("System Warning: Deluge did not respond in time. Proceeding with startup, but scheduled runs may fail.")
     return False
 
@@ -112,8 +136,8 @@ def save_json(filepath, data):
 
 def get_settings():
     return load_json(SETTINGS_FILE, {
-        'run_interval': 15, 
-        'log_retention_days': 30, 
+        'run_interval': 15,
+        'log_retention_days': 30,
         'timezone': 'UTC',
         'tracker_mode': 'all',
         'dry_run': False
@@ -126,7 +150,7 @@ def apply_timezone(tz_string):
         time.tzset()
 
 def write_log(message):
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    os.makedirs(LOG_DIR, exist_ok=True)
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     log_entry = f"[{timestamp}] {message}"
     print(log_entry)
@@ -145,6 +169,7 @@ def cleanup_logs():
     try:
         with open(LOG_FILE, 'r') as f:
             lines = f.readlines()
+
         for line in lines:
             try:
                 time_str = line[1:20]
@@ -153,6 +178,14 @@ def cleanup_logs():
                     valid_lines.append(line)
             except ValueError:
                 valid_lines.append(line)
+
+        # Hard cap: if log still exceeds max size, keep only the most recent lines
+        estimated_size = sum(len(l.encode('utf-8')) for l in valid_lines)
+        if estimated_size > LOG_MAX_BYTES:
+            write_log("System Warning: Log file exceeds 10MB cap. Truncating to most recent entries.")
+            while valid_lines and sum(len(l.encode('utf-8')) for l in valid_lines) > LOG_MAX_BYTES:
+                valid_lines.pop(0)
+
         with open(LOG_FILE, 'w') as f:
             f.writelines(valid_lines)
         write_log("System: Automated log cleanup completed.")
@@ -172,69 +205,108 @@ def download_default_logo():
         except Exception as e:
             write_log(f"System Error: Failed to download default logo: {e}")
 
+def get_deluge_status():
+    """Returns True if Deluge is reachable, False otherwise."""
+    if not DELUGE_HOST:
+        return False
+    try:
+        with deluge_session() as client:
+            client.call('daemon.info')
+        return True
+    except Exception:
+        return False
+
 def get_dashboard_data():
     try:
         with deluge_session() as client:
             torrents = client.call('core.get_torrents_status', {}, ['trackers', 'label'])
-            
+
         summary = {}
         labels = set()
         settings = get_settings()
         tracker_mode = settings.get('tracker_mode', 'all')
-        
+
         for torrent_id, data in torrents.items():
             lbl = data.get(b'label', b'').decode('utf-8', 'ignore')
             if lbl:
                 labels.add(lbl)
-            
+
             trackers_list = [t.get(b'url', b'').decode('utf-8', 'ignore') for t in data.get(b'trackers', []) if t.get(b'url')]
-            
+
             if tracker_mode == 'top' and trackers_list:
                 trackers_list = [trackers_list[0]]
-                
+
             for raw_url in trackers_list:
                 domain = raw_url.split('/')[2] if '//' in raw_url else raw_url
                 summary[domain] = summary.get(domain, 0) + 1
-                
+
         return summary, sorted(list(labels))
     except Exception as e:
         print(f"Deluge Error: {e}")
         return {}, []
 
+def validate_rule(form):
+    """Returns an error string if the rule is invalid, or None if valid."""
+    group_id = form.get('group_id', '').strip()
+    label = form.get('label', '').strip()
+    try:
+        max_hours = float(form.get('max_hours', 0))
+    except (ValueError, TypeError):
+        return "Threshold hours must be a valid number."
+    try:
+        min_torrents = int(form.get('min_torrents', 0))
+    except (ValueError, TypeError):
+        return "Min Keep must be a valid integer."
+
+    if not group_id:
+        return "Target Tag cannot be empty."
+    if not label:
+        return "Deluge Label cannot be empty."
+    if max_hours <= 0:
+        return "Threshold hours must be greater than 0."
+    if min_torrents < 0:
+        return "Min Keep cannot be negative."
+    return None
+
 def process_torrents(run_type="Scheduled"):
-    groups = load_json(GROUPS_FILE, {})
-    rules = load_json(RULES_FILE, [])
-    
-    if not rules or not groups:
-        write_log(f"{run_type} Engine Run: Skipped. No tags or rules are configured yet.")
+    if not _engine_lock.acquire(blocking=False):
+        write_log(f"{run_type} Engine Run: Skipped. Another run is already in progress.")
         return
 
     try:
+        groups = load_json(GROUPS_FILE, {})
+        rules_list = load_json(RULES_FILE, [])
+
+        if not rules_list or not groups:
+            write_log(f"{run_type} Engine Run: Skipped. No tags or rules are configured yet.")
+            return
+
         # STEP 1: Fetch data and close connection immediately
         with deluge_session() as client:
-            fields = ['name', 'trackers', 'label', 'seeding_time', 'time_added', 'state']
+            fields = ['name', 'trackers', 'label', 'seeding_time', 'time_added', 'state', 'active_time']
             torrents = client.call('core.get_torrents_status', {}, fields)
-            
-        # STEP 2: Process locally (No active RPC connection)
+
+        # STEP 2: Process locally (no active RPC connection)
         current_time = time.time()
         settings = get_settings()
         tracker_mode = settings.get('tracker_mode', 'all')
         is_dry_run = settings.get('dry_run', False)
-        
-        removed_count = 0  
+
+        removed_count = 0
         torrents_to_remove = []
-        
-        for rule in rules:
+        seen_ids = set()  # Duplicate removal protection
+
+        for rule in rules_list:
             target_group = rule.get('group_id', '')
             target_label = rule.get('label', '')
             target_state = rule.get('target_state', 'All')
             time_metric = rule.get('time_metric', 'seeding_time')
-            
+
             try:
                 min_torrents = int(rule.get('min_torrents', rule.get('min_keep', 0)))
             except (ValueError, TypeError):
                 min_torrents = 0
-                
+
             try:
                 rule_max_hours = float(rule.get('max_hours', 0))
             except (ValueError, TypeError):
@@ -243,39 +315,46 @@ def process_torrents(run_type="Scheduled"):
             sort_order = rule.get('sort_order', 'oldest_added')
             if sort_order == 'oldest_first': sort_order = 'oldest_added'
             if sort_order == 'newest_first': sort_order = 'newest_added'
-            
+
             matching_torrents = []
-            
+
             for tid, data in torrents.items():
                 name = data.get(b'name', b'').decode('utf-8', 'ignore')
                 label = data.get(b'label', b'').decode('utf-8', 'ignore')
                 state = data.get(b'state', b'').decode('utf-8', 'ignore')
-                
+
                 seeding_hours = int(data.get(b'seeding_time') or 0) / 3600.0
                 time_added = int(data.get(b'time_added') or 0)
-                
+                active_hours = int(data.get(b'active_time') or 0) / 3600.0
+
+                total_age_hours = (current_time - time_added) / 3600.0
+                paused_hours = max(0.0, total_age_hours - active_hours)
+
                 if target_state != 'All' and state != target_state:
                     continue
-                
+
                 trackers_list = [t.get(b'url', b'').decode('utf-8', 'ignore') for t in data.get(b'trackers', []) if t.get(b'url')]
-                if not trackers_list: continue
-                
+                if not trackers_list:
+                    continue
+
                 if tracker_mode == 'top':
                     trackers_list = [trackers_list[0]]
-                
+
                 matched_group = False
                 for raw_url in trackers_list:
                     domain = raw_url.split('/')[2] if '//' in raw_url else raw_url
                     if groups.get(domain) == target_group:
                         matched_group = True
                         break
-                
+
                 if matched_group and label.lower() == target_label.lower():
                     if time_metric == 'time_added':
-                        trigger_value = (current_time - time_added) / 3600.0
+                        trigger_value = total_age_hours
+                    elif time_metric == 'time_paused':
+                        trigger_value = paused_hours
                     else:
                         trigger_value = seeding_hours
-                        
+
                     matching_torrents.append({
                         'id': tid,
                         'name': name,
@@ -283,28 +362,25 @@ def process_torrents(run_type="Scheduled"):
                         'time_added': time_added,
                         'trigger_value': trigger_value
                     })
-            
+
             if not matching_torrents:
                 continue
-                
+
             if sort_order == 'oldest_added':
-                matching_torrents.sort(key=lambda x: x['time_added'], reverse=False) 
+                matching_torrents.sort(key=lambda x: x['time_added'], reverse=False)
             elif sort_order == 'newest_added':
                 matching_torrents.sort(key=lambda x: x['time_added'], reverse=True)
             elif sort_order == 'longest_seeding':
                 matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=True)
             elif sort_order == 'shortest_seeding':
                 matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=False)
-                
-            if min_torrents > 0:
-                candidates_for_removal = matching_torrents[min_torrents:]
-            else:
-                candidates_for_removal = matching_torrents
-                
+
+            candidates_for_removal = matching_torrents[min_torrents:] if min_torrents > 0 else matching_torrents
+
             for t in candidates_for_removal:
-                if t['trigger_value'] >= rule_max_hours:
+                if t['trigger_value'] >= rule_max_hours and t['id'] not in seen_ids:
+                    seen_ids.add(t['id'])
                     should_delete_data = rule.get('delete_data', False)
-                    # Queue it up instead of executing immediately
                     torrents_to_remove.append({
                         'id': t['id'],
                         'name': t['name'],
@@ -313,8 +389,8 @@ def process_torrents(run_type="Scheduled"):
                         'metric': time_metric,
                         'delete_data': should_delete_data
                     })
-        
-        # STEP 3: Execute Deletions (Re-open connection only if needed)
+
+        # STEP 3: Execute deletions (re-open connection only if needed)
         if torrents_to_remove:
             if is_dry_run:
                 for t in torrents_to_remove:
@@ -330,14 +406,13 @@ def process_torrents(run_type="Scheduled"):
                         except Exception as del_err:
                             write_log(f"Failed to remove '{t['name']}': {del_err}")
 
-        # Log the final heartbeat result of the run
         if not torrents_to_remove:
             write_log(f"{run_type} Engine Run: Checked Deluge, no torrents met removal criteria.")
         else:
             mode_text = "[DRY RUN] " if is_dry_run else ""
             action_text = "identified" if is_dry_run else "removed"
             write_log(f"{mode_text}{run_type} Engine Run: Completed. Successfully {action_text} {removed_count} torrent(s).")
-                    
+
     except ConnectionResetError:
         write_log("Engine Run: Skipped. Deluge actively refused the connection (Deluge possibly restarting).")
     except Exception as e:
@@ -345,6 +420,8 @@ def process_torrents(run_type="Scheduled"):
             write_log("Engine Run: Skipped. Lost connection to Deluge (Daemon likely offline).")
         else:
             write_log(f"Background Task Error: {e}")
+    finally:
+        _engine_lock.release()
 
 # --- HTML TEMPLATE ---
 MASTER_TEMPLATE = """
@@ -358,7 +435,6 @@ MASTER_TEMPLATE = """
     <link rel="manifest" href="{{ url_for('manifest') }}">
     <meta name="theme-color" content="#0f172a">
     <link rel="apple-touch-icon" href="{{ url_for('favicon') }}?v={{ version }}">
-
     <link rel="icon" type="image/png" href="{{ url_for('favicon') }}?v={{ version }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -368,74 +444,62 @@ MASTER_TEMPLATE = """
             --bg-main: #0f172a; --bg-sidebar: #1e293b; --bg-card: #1e293b; --bg-input: #0f172a;
             --text-main: #f8fafc; --text-muted: #94a3b8; --accent: #6366f1; --accent-hover: #4f46e5;
             --border-color: #334155; --danger: #ef4444; --danger-hover: #dc2626; --success: #10b981;
+            --warning: #f59e0b;
         }
         * { box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; margin: 0; background-color: var(--bg-main); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
 
         /* DESKTOP SIDEBAR */
-        .sidebar { 
-            width: 260px; 
-            flex-shrink: 0; 
-            background-color: var(--bg-sidebar); 
-            display: flex; 
-            flex-direction: column; 
-            border-right: 1px solid var(--border-color); 
-            z-index: 1000; 
-            transition: width 0.25s ease, left 0.3s ease;
-            overflow: hidden; 
-        }
-        
-        .brand { 
-            display: flex; 
-            align-items: center; 
-            padding: 20px 15px; 
-            height: 78px; 
-            border-bottom: 1px solid var(--border-color); 
-            white-space: nowrap; 
-            overflow: hidden; 
-        }
-        
+        .sidebar { width: 260px; flex-shrink: 0; background-color: var(--bg-sidebar); display: flex; flex-direction: column; border-right: 1px solid var(--border-color); z-index: 1000; transition: width 0.25s ease, left 0.3s ease; overflow: hidden; }
+        .brand { display: flex; align-items: center; padding: 20px 15px; height: 78px; border-bottom: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; }
         .brand-logo { width: 32px; height: 32px; border-radius: 4px; flex-shrink: 0; object-fit: contain; }
         .brand-text { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; margin-left: 12px; }
-        
         .nav-menu { display: flex; flex-direction: column; padding: 20px 15px; gap: 8px; flex-grow: 1; overflow-x: hidden; }
-        
         .nav-link { display: flex; align-items: center; padding: 12px 16px; color: var(--text-muted); text-decoration: none; border-radius: 8px; font-weight: 500; transition: all 0.2s ease; cursor: pointer; border: none; background: none; font-size: 15px; text-align: left; white-space: nowrap; }
         .nav-link:hover { background-color: rgba(255, 255, 255, 0.05); color: var(--text-main); }
         .nav-link.active { background: linear-gradient(90deg, rgba(99,102,241,0.15) 0%, rgba(99,102,241,0) 100%); color: var(--accent); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; }
-        
         .nav-icon { width: 22px; height: 22px; margin-right: 12px; flex-shrink: 0; }
-        
         .nav-action { background-color: var(--accent); color: white; font-weight: 600; text-align: center; justify-content: center; margin-top: 15px; }
         .nav-action:hover { background-color: var(--accent-hover); color: white; }
         .version-tag { padding: 15px 25px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+        /* CONNECTION STATUS BADGE */
+        .conn-status { display: flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 13px; font-weight: 500; border-radius: 8px; margin-top: 4px; }
+        .conn-status .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .conn-status.connected { color: var(--success); background: rgba(16, 185, 129, 0.08); }
+        .conn-status.connected .dot { background-color: var(--success); }
+        .conn-status.disconnected { color: var(--danger); background: rgba(239, 68, 68, 0.08); }
+        .conn-status.disconnected .dot { background-color: var(--danger); }
+
         /* DESKTOP SIDEBAR COLLAPSED STATE */
         body.sidebar-collapsed .sidebar { width: 72px; }
         body.sidebar-collapsed .brand { justify-content: center; padding: 20px 0; }
-        body.sidebar-collapsed .nav-text,
-        body.sidebar-collapsed .brand-text,
-        body.sidebar-collapsed .version-tag { display: none !important; }
+        body.sidebar-collapsed .nav-text, body.sidebar-collapsed .brand-text, body.sidebar-collapsed .version-tag { display: none !important; }
         body.sidebar-collapsed .nav-link { justify-content: center; padding: 12px 0; }
         body.sidebar-collapsed .nav-icon { margin-right: 0; }
         body.sidebar-collapsed .nav-action { width: 42px; height: 42px; padding: 0; margin-left: auto; margin-right: auto; border-radius: 8px; }
-        
+        body.sidebar-collapsed .conn-status { justify-content: center; padding: 10px 0; }
+        body.sidebar-collapsed .conn-status .conn-label { display: none; }
+
         .main-content { flex-grow: 1; padding: 0 40px 40px 40px; overflow-y: auto; position: relative; }
-        
         .top-header { display: flex; align-items: center; gap: 15px; padding: 0 40px; margin: 0 -40px 20px -40px; height: 78px; position: sticky; top: 0; z-index: 1050; background-color: rgba(15, 23, 42, 0.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border-color); }
         .page-header { font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }
-        
         .btn-toggle-sidebar { background: none; border: none; padding: 8px; cursor: pointer; color: var(--text-muted); border-radius: 6px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
         .btn-toggle-sidebar:hover { color: var(--text-main); background: rgba(255,255,255,0.05); }
         .btn-toggle-sidebar svg { width: 24px; height: 24px; }
-        
         body.sidebar-collapsed .icon-collapse { display: none; }
         body:not(.sidebar-collapsed) .icon-expand { display: none; }
+
+        /* FLASH MESSAGES */
+        .flash-container { margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
+        .flash { padding: 12px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px; }
+        .flash.success { background: rgba(16, 185, 129, 0.1); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.2); }
+        .flash.error { background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2); }
+        .flash.warning { background: rgba(245, 158, 11, 0.1); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.2); }
 
         .card { background-color: var(--bg-card); border-radius: 12px; border: 1px solid var(--border-color); padding: 24px; margin-bottom: 30px; }
         .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; }
         .card-title { font-size: 18px; font-weight: 600; margin: 0; }
-
         .table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 6px; }
         table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 600px; }
         th { text-align: left; padding: 12px 16px; color: var(--text-muted); font-weight: 500; border-bottom: 2px solid var(--border-color); white-space: nowrap; }
@@ -444,11 +508,11 @@ MASTER_TEMPLATE = """
         tr:hover td { background-color: rgba(255, 255, 255, 0.02); }
 
         input[type="text"], input[type="number"], select { padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-input); color: var(--text-main); font-family: 'Inter', sans-serif; font-size: 14px; }
-        input[type="file"] { padding: 6px 10px; border: 1px dashed var(--border-color); background: rgba(255,255,255,0.02); color: var(--text-muted); cursor: pointer; border-radius: 6px; font-family: 'Inter', sans-serif; font-size: 13px; width: 100%;}
+        input[type="file"] { padding: 6px 10px; border: 1px dashed var(--border-color); background: rgba(255,255,255,0.02); color: var(--text-muted); cursor: pointer; border-radius: 6px; font-family: 'Inter', sans-serif; font-size: 13px; width: 100%; }
         input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
         option { background-color: var(--bg-main); color: var(--text-main); }
 
-        .btn { background-color: var(--border-color); color: var(--text-main); padding: 10px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.2s ease; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; font-size: 14px; white-space: nowrap;}
+        .btn { background-color: var(--border-color); color: var(--text-main); padding: 10px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.2s ease; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; font-size: 14px; white-space: nowrap; }
         .btn:hover { background-color: #475569; }
         .btn-primary { background-color: var(--accent); color: white; }
         .btn-primary:hover { background-color: var(--accent-hover); }
@@ -460,50 +524,37 @@ MASTER_TEMPLATE = """
         .form-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
         .status-badge-yes { color: var(--danger); font-weight: bold; background: rgba(239, 68, 68, 0.1); padding: 4px 8px; border-radius: 4px; }
         .status-badge-no { color: var(--success); font-weight: bold; background: rgba(16, 185, 129, 0.1); padding: 4px 8px; border-radius: 4px; }
-        
         .settings-label { display: block; font-weight: 500; margin-bottom: 8px; color: var(--text-muted); }
         .settings-group { margin-bottom: 25px; }
-        
         .data-management-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; }
         .data-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-        
-        /* MOBILE OVERLAY BACKGROUND */
+
+        /* MOBILE OVERLAY */
         .mobile-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 1990; backdrop-filter: blur(2px); }
 
-        /* RESPONSIVE DESIGN FOR MOBILE DEVICES */
         @media (max-width: 768px) {
             body { flex-direction: column; }
-            
-            /* Sidebar becomes a sliding drawer */
             .sidebar { position: fixed; top: 0; bottom: 0; left: -260px; width: 260px !important; box-shadow: 4px 0 15px rgba(0,0,0,0.5); z-index: 2000; transition: left 0.3s ease; }
             body.mobile-sidebar-open .sidebar { left: 0; }
             body.mobile-sidebar-open .mobile-overlay { display: block; }
-            
-            /* Show text on mobile sidebar */
             body.sidebar-collapsed .nav-text, body.sidebar-collapsed .brand-text, body.sidebar-collapsed .version-tag { display: block !important; }
+            body.sidebar-collapsed .conn-status .conn-label { display: inline !important; }
             body.sidebar-collapsed .nav-link { justify-content: flex-start; padding: 12px 16px; }
             body.sidebar-collapsed .nav-icon { margin-right: 12px; }
             body.sidebar-collapsed .brand { justify-content: flex-start; padding: 20px 15px; }
-            
-            /* Main Content Adjustments */
             .main-content { padding: 0 15px 30px 15px; width: 100%; }
             .top-header { padding: 15px; margin: 0 -15px 10px -15px; }
             .page-header { font-size: 22px; }
             .card { padding: 15px; }
-            
-            /* Make Tables Swipeable */
             table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
-            
-            /* Stack Forms & Buttons vertically for thumbs */
             .form-row { flex-direction: column; align-items: stretch; gap: 10px; }
             .form-row input, .form-row select, .form-row button, .form-row label { width: 100% !important; margin-left: 0 !important; }
-            
             .data-management-row, .data-actions { flex-direction: column; width: 100%; align-items: stretch; }
             .data-actions form { display: flex; flex-direction: column; width: 100%; gap: 10px; }
             .btn { width: 100%; justify-content: center; }
             #trackerFilter, .tag-input { width: 100% !important; }
         }
-</style>
+    </style>
 </head>
 <body>
     <script>
@@ -511,7 +562,7 @@ MASTER_TEMPLATE = """
             document.body.classList.add('sidebar-collapsed');
         }
     </script>
-    
+
     <div class="mobile-overlay" id="mobileOverlay"></div>
 
     <div class="sidebar" id="sidebar">
@@ -519,7 +570,7 @@ MASTER_TEMPLATE = """
             <img src="{{ url_for('favicon') }}?v={{ version }}" class="brand-logo" alt="Logo">
             <span class="brand-text">Delegatarr</span>
         </div>
-        
+
         <div class="nav-menu">
             <a href="{{ url_for('trackers') }}" class="nav-link {% if active_page == 'trackers' %}active{% endif %}" title="Tracker Config">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>
@@ -537,9 +588,14 @@ MASTER_TEMPLATE = """
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 <span class="nav-text">Settings</span>
             </a>
-            
+
             <div style="flex-grow: 1;"></div>
-            
+
+            <div class="conn-status {{ 'connected' if deluge_connected else 'disconnected' }}" title="Deluge {{ 'Connected' if deluge_connected else 'Unreachable' }}">
+                <span class="dot"></span>
+                <span class="nav-text conn-label">{{ 'Connected' if deluge_connected else 'Unreachable' }}</span>
+            </div>
+
             <form action="{{ url_for('run_now') }}" method="POST" style="margin: 0;">
                 <input type="hidden" name="return_url" value="{{ request.path }}">
                 <button type="submit" class="nav-link nav-action" title="Run Engine Now">
@@ -552,7 +608,7 @@ MASTER_TEMPLATE = """
     </div>
 
     <div class="main-content">
-        
+
         <div class="top-header">
             <button type="button" class="btn-toggle-sidebar" id="sidebarToggle" title="Toggle Sidebar">
                 <svg class="icon-collapse" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -564,7 +620,17 @@ MASTER_TEMPLATE = """
             </button>
             <h1 class="page-header">{{ page_title }}</h1>
         </div>
-        
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            <div class="flash-container">
+                {% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        {% endwith %}
+
         {% if active_page == 'trackers' %}
         <div class="card">
             <form action="{{ url_for('update_groups') }}" method="POST">
@@ -576,7 +642,7 @@ MASTER_TEMPLATE = """
                         <option value="tagged">Show Current Tagged</option>
                     </select>
                 </div>
-                
+
                 <div class="table-wrapper">
                     <table id="trackerTable">
                         <tr>
@@ -643,34 +709,35 @@ MASTER_TEMPLATE = """
 
                     <input list="labelList" name="label" placeholder="Deluge Label" style="width: 120px;" required autocomplete="off">
                     <datalist id="labelList">{% for label in unique_labels %}<option value="{{ label }}">{% endfor %}</datalist>
-                    
+
                     <select name="target_state" style="width: 120px;">
                         <option value="All">State: All</option>
                         <option value="Seeding">Seeding</option>
                         <option value="Paused">Paused</option>
                         <option value="Downloading">Downloading</option>
                     </select>
-                    
+
                     <select name="time_metric" style="width: 170px;">
                         <option value="seeding_time">Seeding Time ></option>
                         <option value="time_added">Time Since Added ></option>
+                        <option value="time_paused">Time Paused ></option>
                     </select>
-                    
+
                     <input type="number" name="max_hours" placeholder="Hours" step="any" style="width: 80px;" required>
                     <input type="number" name="min_torrents" placeholder="Min Keep" style="width: 90px;" value="0" required>
-                    
+
                     <select name="sort_order" style="width: 200px;">
                         <option value="oldest_added">Remove Oldest Added</option>
                         <option value="newest_added">Remove Newest Added</option>
                         <option value="longest_seeding">Remove Longest Seeding</option>
                         <option value="shortest_seeding">Remove Shortest Seeding</option>
                     </select>
-                    
+
                     <label style="display: flex; align-items: center; gap: 8px; font-weight: 500;">
-                        <input type="checkbox" name="delete_data" value="yes" style="width: 18px; height: 18px; accent-color: var(--danger);"> 
+                        <input type="checkbox" name="delete_data" value="yes" style="width: 18px; height: 18px; accent-color: var(--danger);">
                         Delete Data
                     </label>
-                    
+
                     <button type="submit" class="btn btn-primary" style="margin-left: auto;">+ Add Rule</button>
                 </div>
             </form>
@@ -681,12 +748,16 @@ MASTER_TEMPLATE = """
                     <tr>
                         <th>Tag</th><th>Label</th><th>State</th><th>Metric</th><th>Threshold</th><th>Min Keep</th><th>Sorting Priority</th><th>Del Data?</th><th></th>
                     </tr>
-                    {% for rule in rules %}
+                    {% for rule in rules_list %}
                     <tr>
                         <td><strong style="color: var(--accent);">{{ rule.get('group_id') }}</strong></td>
                         <td>{{ rule.get('label') }}</td>
                         <td><span style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">{{ rule.get('target_state', 'All') }}</span></td>
-                        <td>{{ 'Time Since Added' if rule.get('time_metric') == 'time_added' else 'Seeding Time' }}</td>
+                        <td>
+                            {% if rule.get('time_metric') == 'time_added' %}Time Since Added
+                            {% elif rule.get('time_metric') == 'time_paused' %}Time Paused
+                            {% else %}Seeding Time{% endif %}
+                        </td>
                         <td>> {{ rule.get('max_hours') }} hrs</td>
                         <td>{{ rule.get('min_torrents', rule.get('min_keep', 0)) }}</td>
                         <td style="color: var(--text-muted);">
@@ -697,7 +768,8 @@ MASTER_TEMPLATE = """
                         </td>
                         <td>{% if rule.get('delete_data') %}<span class="status-badge-yes">YES</span>{% else %}<span class="status-badge-no">NO</span>{% endif %}</td>
                         <td style="text-align: right;">
-                            <form action="{{ url_for('delete_rule', index=loop.index0) }}" method="POST" style="margin:0;">
+                            <form action="{{ url_for('delete_rule', index=loop.index0) }}" method="POST" style="margin:0;"
+                                  onsubmit="return confirm('Delete this rule? This cannot be undone.');">
                                 <button type="submit" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;">Delete</button>
                             </form>
                         </td>
@@ -713,20 +785,20 @@ MASTER_TEMPLATE = """
         <div class="card">
             <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: monospace; font-size: 13px; color: var(--text-muted); line-height: 1.6;">{{ log_content }}</pre>
         </div>
-        
+
         {% elif active_page == 'settings' %}
         <div class="card" style="max-width: 650px;">
             <div class="card-header">
                 <h3 class="card-title">Application Settings</h3>
             </div>
             <form action="{{ url_for('save_settings') }}" method="POST">
-                
+
                 <div class="settings-group">
                     <label class="settings-label">Engine Run Interval (Minutes)</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">How often should Delegatarr run in the background to check the rules?</p>
                     <input type="number" name="run_interval" value="{{ app_settings.get('run_interval', 15) }}" min="1" required style="width: 150px;">
                 </div>
-                
+
                 <div class="settings-group">
                     <label class="settings-label">Log Retention (Days)</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">How many days of history should be kept in the Activity Logs?</p>
@@ -736,10 +808,9 @@ MASTER_TEMPLATE = """
                 <div class="settings-group">
                     <label class="settings-label">System Timezone</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Used to correctly timestamp logs and trigger scheduled tasks.</p>
-                    <select id="tzSelect" name="timezone" style="width: 250px;">
-                        </select>
+                    <select id="tzSelect" name="timezone" style="width: 250px;"></select>
                 </div>
-                
+
                 <div class="settings-group">
                     <label class="settings-label">Tracker Reading Mode</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Should Delegatarr read all trackers attached to a torrent, or just the primary tracker?</p>
@@ -748,37 +819,37 @@ MASTER_TEMPLATE = """
                         <option value="top" {% if app_settings.get('tracker_mode', 'all') == 'top' %}selected{% endif %}>Primary Tracker</option>
                     </select>
                 </div>
-                
+
                 <div class="settings-group">
                     <label class="settings-label" style="display: flex; align-items: center; gap: 8px;">
                         <input type="checkbox" name="dry_run" value="yes" {% if app_settings.get('dry_run') %}checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        Enable Dry Run
+                        Enable Dry Run Mode
                     </label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 5px; margin-bottom: 10px;">If enabled, Delegatarr will only log the torrents it WOULD remove, without actually deleting them from Deluge.</p>
                 </div>
-                
+
                 <div style="border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 10px;">
                     <button type="submit" class="btn btn-primary">Save Changes</button>
                 </div>
             </form>
         </div>
-        
+
         <div class="card" style="max-width: 650px;">
             <div class="card-header">
                 <h3 class="card-title">Data Management</h3>
             </div>
-            
+
             <div class="data-management-row">
                 <div class="data-actions">
                     <a href="{{ url_for('export_settings') }}" class="btn btn-primary">Export All Data</a>
-                    
+
                     <form action="{{ url_for('import_settings') }}" method="POST" enctype="multipart/form-data" style="margin: 0; display: flex; gap: 8px;">
                         <input type="file" name="settings_file" accept=".json" required>
                         <button type="submit" class="btn">Import</button>
                     </form>
                 </div>
             </div>
-            
+
             <div class="data-actions" style="margin-top: 25px; border-top: 1px solid var(--border-color); padding-top: 20px; justify-content: space-between;">
                 <div>
                     <strong style="color: var(--danger); display: block; margin-bottom: 4px;">Danger Zone</strong>
@@ -787,14 +858,12 @@ MASTER_TEMPLATE = """
                     <form action="{{ url_for('factory_reset_settings') }}" method="POST" style="margin: 0; flex-grow: 1;" onsubmit="return confirm('WARNING: Are you sure? This will wipe your App Settings and restore them to default. Your Rules and Tags will NOT be touched.');">
                         <button type="submit" class="btn btn-danger">Reset Settings</button>
                     </form>
-                    
+
                     <form action="{{ url_for('factory_reset_all') }}" method="POST" style="margin: 0; flex-grow: 1;" onsubmit="return confirm('CRITICAL WARNING: Are you absolutely sure? This will completely WIPE ALL Settings, Rules, and Tracker Tags. This cannot be undone!');">
                         <button type="submit" class="btn btn-danger-dark" title="Delete everything and start fresh">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
-                                <circle cx="9" cy="12" r="1"/>
-                                <circle cx="15" cy="12" r="1"/>
-                                <path d="M8 20v2h8v-2"/>
-                                <path d="m12.5 17-.5-1-.5 1h1z"/>
+                                <circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/>
+                                <path d="M8 20v2h8v-2"/><path d="m12.5 17-.5-1-.5 1h1z"/>
                                 <path d="M16 20a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20"/>
                             </svg>
                             Nuclear Option
@@ -802,16 +871,14 @@ MASTER_TEMPLATE = """
                     </form>
                 </div>
             </div>
-
         </div>
-        
+
         <script>
             document.addEventListener('DOMContentLoaded', () => {
                 const tzSelect = document.getElementById('tzSelect');
                 if (tzSelect) {
                     const timeZones = Intl.supportedValuesOf('timeZone');
                     const currentTz = "{{ app_settings.get('timezone', 'UTC') }}";
-                    
                     timeZones.forEach(tz => {
                         const option = document.createElement('option');
                         option.value = tz;
@@ -825,12 +892,12 @@ MASTER_TEMPLATE = """
         {% endif %}
 
     </div>
-    
+
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const toggleBtn = document.getElementById('sidebarToggle');
             const mobileOverlay = document.getElementById('mobileOverlay');
-            
+
             if (toggleBtn) {
                 toggleBtn.addEventListener('click', () => {
                     if (window.innerWidth <= 768) {
@@ -841,7 +908,7 @@ MASTER_TEMPLATE = """
                     }
                 });
             }
-            
+
             if (mobileOverlay) {
                 mobileOverlay.addEventListener('click', () => {
                     document.body.classList.remove('mobile-sidebar-open');
@@ -859,11 +926,34 @@ MASTER_TEMPLATE = """
             });
         }
     </script>
+    
+    <script>
+        // Auto-dismiss flash messages after 4 seconds
+        document.addEventListener('DOMContentLoaded', () => {
+            const flashes = document.querySelectorAll('.flash');
+            if (flashes.length > 0) {
+                setTimeout(() => {
+                    flashes.forEach(flash => {
+                        flash.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+                        flash.style.opacity = '0';
+                        flash.style.transform = 'translateY(-10px)';
+                        setTimeout(() => flash.remove(), 500); // Remove from DOM after fade
+                    });
+                }, 4000);
+            }
+        });
+    </script>
 </body>
 </html>
 """
 
 # --- ROUTES ---
+def render_page(**kwargs):
+    """Shared helper that injects deluge_connected into every page render."""
+    kwargs.setdefault('version', APP_VERSION)
+    kwargs['deluge_connected'] = get_deluge_status()
+    return render_template_string(MASTER_TEMPLATE, **kwargs)
+
 @app.route('/')
 def index():
     return redirect(url_for('trackers'))
@@ -872,15 +962,15 @@ def index():
 def trackers():
     summary, _ = get_dashboard_data()
     groups = load_json(GROUPS_FILE, {})
-    return render_template_string(MASTER_TEMPLATE, active_page='trackers', page_title='Tracker Configuration', tracker_summary=summary, groups=groups, version=APP_VERSION)
+    return render_page(active_page='trackers', page_title='Tracker Configuration', tracker_summary=summary, groups=groups)
 
 @app.route('/rules')
 def rules():
     _, unique_labels = get_dashboard_data()
     groups = load_json(GROUPS_FILE, {})
-    rules = load_json(RULES_FILE, [])
+    rules_list = load_json(RULES_FILE, [])
     unique_tags = sorted(list(set(tag for tag in groups.values() if tag.strip())))
-    return render_template_string(MASTER_TEMPLATE, active_page='rules', page_title='Removal Rules Engine', rules=rules, unique_tags=unique_tags, unique_labels=unique_labels, version=APP_VERSION)
+    return render_page(active_page='rules', page_title='Removal Rules Engine', rules_list=rules_list, unique_tags=unique_tags, unique_labels=unique_labels)
 
 @app.route('/logs')
 def view_logs():
@@ -891,14 +981,14 @@ def view_logs():
             lines.reverse()
             if lines:
                 log_content = "".join(lines)
-    return render_template_string(MASTER_TEMPLATE, active_page='logs', page_title='Activity Logs', log_content=log_content, version=APP_VERSION)
+    return render_page(active_page='logs', page_title='Activity Logs', log_content=log_content)
 
 @app.route('/settings')
 def settings_page():
     current_settings = get_settings()
     if 'timezone' not in current_settings:
         current_settings['timezone'] = os.environ.get('TZ', 'UTC')
-    return render_template_string(MASTER_TEMPLATE, active_page='settings', page_title='Settings', app_settings=current_settings, version=APP_VERSION)
+    return render_page(active_page='settings', page_title='Settings', app_settings=current_settings)
 
 @app.route('/save_settings', methods=['POST'])
 def save_settings():
@@ -906,16 +996,16 @@ def save_settings():
         new_interval = int(request.form.get('run_interval', 15))
     except (ValueError, TypeError):
         new_interval = 15
-        
+
     try:
         new_retention = int(request.form.get('log_retention_days', 30))
     except (ValueError, TypeError):
         new_retention = 30
-        
+
     new_tz = request.form.get('timezone', 'UTC')
     new_tracker_mode = request.form.get('tracker_mode', 'all')
     new_dry_run = 'dry_run' in request.form
-    
+
     settings_data = {
         'run_interval': new_interval,
         'log_retention_days': new_retention,
@@ -924,15 +1014,16 @@ def save_settings():
         'dry_run': new_dry_run
     }
     save_json(SETTINGS_FILE, settings_data)
-    
     apply_timezone(new_tz)
-    
+
     try:
         scheduler.reschedule_job('main_engine_job', trigger='interval', minutes=new_interval)
         dry_run_state = "ON" if new_dry_run else "OFF"
         write_log(f"System: Settings updated. Interval: {new_interval}m, TZ: {new_tz}, Tracker Mode: {new_tracker_mode}, Dry Run: {dry_run_state}.")
+        flash("Settings saved successfully.", "success")
     except Exception as e:
         print(f"Failed to reschedule job: {e}")
+        flash("Settings saved, but scheduler could not be updated. Restart may be required.", "warning")
 
     return redirect(url_for('settings_page'))
 
@@ -963,8 +1054,12 @@ def import_settings():
                 else:
                     save_json(SETTINGS_FILE, data)
                 write_log("System: Full backup imported successfully.")
+                flash("Backup imported successfully.", "success")
             except Exception as e:
                 write_log(f"System Error: Failed to import backup file. {e}")
+                flash(f"Import failed: {e}", "error")
+        else:
+            flash("No file selected.", "error")
     return redirect(url_for('settings_page'))
 
 @app.route('/factory_reset_settings', methods=['POST'])
@@ -978,6 +1073,7 @@ def factory_reset_settings():
     }
     save_json(SETTINGS_FILE, default_settings)
     write_log("System: Factory reset performed on application settings only.")
+    flash("Settings reset to defaults. Rules and tags were not affected.", "warning")
     return redirect(url_for('settings_page'))
 
 @app.route('/factory_reset_all', methods=['POST'])
@@ -993,6 +1089,7 @@ def factory_reset_all():
     save_json(RULES_FILE, [])
     save_json(GROUPS_FILE, {})
     write_log("System: CRITICAL - Full factory reset performed. All settings, rules, and tags have been wiped.")
+    flash("Full factory reset complete. All settings, rules, and tags have been wiped.", "error")
     return redirect(url_for('settings_page'))
 
 @app.route('/update_groups', methods=['POST'])
@@ -1000,33 +1097,36 @@ def update_groups():
     groups = load_json(GROUPS_FILE, {})
     for tracker, group_id in request.form.items():
         clean_val = group_id.strip()
-        
         if not clean_val:
             continue
-            
         if clean_val.upper() == 'REMOVE':
             if tracker in groups:
                 del groups[tracker]
         else:
             groups[tracker] = clean_val
-            
     save_json(GROUPS_FILE, groups)
+    flash("Tracker tags saved.", "success")
     return redirect(url_for('trackers'))
 
 @app.route('/add_rule', methods=['POST'])
 def add_rule():
-    rules = load_json(RULES_FILE, [])
-    
+    error = validate_rule(request.form)
+    if error:
+        flash(f"Rule not saved: {error}", "error")
+        return redirect(url_for('rules'))
+
+    rules_list = load_json(RULES_FILE, [])
+
     try:
         max_hours = float(request.form.get('max_hours', 0))
     except (ValueError, TypeError):
         max_hours = 0.0
-        
+
     try:
         min_torrents = int(request.form.get('min_torrents', 0))
     except (ValueError, TypeError):
         min_torrents = 0
-        
+
     new_rule = {
         'group_id': request.form.get('group_id', '').strip(),
         'label': request.form.get('label', '').strip(),
@@ -1037,19 +1137,19 @@ def add_rule():
         'max_hours': max_hours,
         'delete_data': 'delete_data' in request.form
     }
-    rules.append(new_rule)
-    save_json(RULES_FILE, rules)
+    rules_list.append(new_rule)
+    save_json(RULES_FILE, rules_list)
+    flash("Rule added successfully.", "success")
     return redirect(url_for('rules'))
 
 @app.route('/delete_rule/<int:index>', methods=['POST'])
 def delete_rule(index):
-    rules = load_json(RULES_FILE, [])
-    if 0 <= index < len(rules):
-        rules.pop(index)
-        save_json(RULES_FILE, rules)
+    rules_list = load_json(RULES_FILE, [])
+    if 0 <= index < len(rules_list):
+        rules_list.pop(index)
+        save_json(RULES_FILE, rules_list)
+        flash("Rule deleted.", "warning")
     return redirect(url_for('rules'))
-
-SAFE_RETURN_URLS = {'/trackers', '/rules', '/logs', '/settings'}
 
 @app.route('/run_now', methods=['POST'])
 def run_now():
@@ -1070,39 +1170,19 @@ def manifest():
         "background_color": "#0f172a",
         "theme_color": "#0f172a",
         "icons": [
-            {
-                "src": url_for('favicon'),
-                "sizes": "192x192",
-                "type": "image/png"
-            },
-            {
-                "src": url_for('favicon'),
-                "sizes": "512x512",
-                "type": "image/png"
-            }
+            {"src": url_for('favicon'), "sizes": "192x192", "type": "image/png"},
+            {"src": url_for('favicon'), "sizes": "512x512", "type": "image/png"}
         ]
     }
-    return app.response_class(
-        response=json.dumps(manifest_data),
-        status=200,
-        mimetype='application/json'
-    )
+    return app.response_class(response=json.dumps(manifest_data), status=200, mimetype='application/json')
 
 @app.route('/sw.js')
 def service_worker():
     sw_js = """
-    self.addEventListener('install', (e) => {
-      self.skipWaiting();
-    });
-    self.addEventListener('fetch', (e) => {
-      // Pass through normal network requests
-    });
+    self.addEventListener('install', (e) => { self.skipWaiting(); });
+    self.addEventListener('fetch', (e) => {});
     """
-    return app.response_class(
-        response=sw_js,
-        status=200,
-        mimetype='application/javascript'
-    )
+    return app.response_class(response=sw_js, status=200, mimetype='application/javascript')
 
 @app.route('/favicon.ico')
 def favicon():
@@ -1114,24 +1194,22 @@ def favicon():
     return "", 404
 
 if __name__ == '__main__':
-    os.makedirs('/config', exist_ok=True)
-    
     threading.Thread(target=download_default_logo, daemon=True).start()
-    
+
     boot_settings = get_settings()
     boot_interval = int(boot_settings.get('run_interval', 15))
-    
+
     if 'timezone' in boot_settings:
         apply_timezone(boot_settings['timezone'])
     elif 'TZ' in os.environ:
         apply_timezone(os.environ['TZ'])
-    
+
     wait_for_deluge()
-    
+
     scheduler.add_job(func=process_torrents, trigger="interval", minutes=boot_interval, id='main_engine_job')
     scheduler.add_job(func=cleanup_logs, trigger="interval", days=1)
     scheduler.start()
-    
+
     try:
         write_log("System: Starting Waitress WSGI production server on port 5555...")
         serve(app, host='0.0.0.0', port=5555)
