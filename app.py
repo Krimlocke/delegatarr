@@ -422,7 +422,7 @@ MASTER_TEMPLATE = """
         
         .main-content { flex-grow: 1; padding: 0 40px 40px 40px; overflow-y: auto; position: relative; }
         
-        .top-header { display: flex; align-items: center; gap: 15px; padding: 20px 40px; margin: 0 -40px 20px -40px; position: sticky; top: 0; z-index: 1050; background-color: rgba(15, 23, 42, 0.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border-color); }
+        .top-header { display: flex; align-items: center; gap: 15px; padding: 0 40px; margin: 0 -40px 20px -40px; height: 78px; position: sticky; top: 0; z-index: 1050; background-color: rgba(15, 23, 42, 0.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border-color); }
         .page-header { font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }
         
         .btn-toggle-sidebar { background: none; border: none; padding: 8px; cursor: pointer; color: var(--text-muted); border-radius: 6px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
