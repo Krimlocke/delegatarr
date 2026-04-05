@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -65,25 +65,37 @@
 
         /* FLASH MESSAGES */
         .flash-container { margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
-        .flash { padding: 12px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px; }
+        .flash { padding: 12px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px; position: relative; }
         .flash.success { background: rgba(16, 185, 129, 0.1); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.2); }
         .flash.error { background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2); }
         .flash.warning { background: rgba(245, 158, 11, 0.1); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.2); }
+        .flash-close { background: none; border: none; color: inherit; opacity: 0.7; font-size: 18px; cursor: pointer; padding: 0 4px; margin-left: auto; line-height: 1; transition: opacity 0.2s; }
+        .flash-close:hover { opacity: 1; }
 
         .card { background-color: var(--bg-card); border-radius: 12px; border: 1px solid var(--border-color); padding: 24px; margin-bottom: 30px; }
         .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; }
         .card-title { font-size: 18px; font-weight: 600; margin: 0; }
+        
+        /* TABLE & SORTING STYLES */
         .table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 6px; }
         table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 600px; }
         th { text-align: left; padding: 12px 16px; color: var(--text-muted); font-weight: 500; border-bottom: 2px solid var(--border-color); white-space: nowrap; }
         td { padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-main); }
         tr:last-child td { border-bottom: none; }
         tr:hover td { background-color: rgba(255, 255, 255, 0.02); }
+        
+        th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 25px; transition: background-color 0.2s; }
+        th.sortable:hover { color: var(--text-main); background-color: rgba(255,255,255,0.05); }
+        th.sortable::after { content: '↕'; position: absolute; right: 8px; opacity: 0.3; }
+        th.sortable.sorted-asc::after { content: '↑'; opacity: 1; color: var(--accent); }
+        th.sortable.sorted-desc::after { content: '↓'; opacity: 1; color: var(--accent); }
 
         input[type="text"], input[type="number"], select { padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-input); color: var(--text-main); font-family: 'Inter', sans-serif; font-size: 14px; }
         input[type="file"] { padding: 6px 10px; border: 1px dashed var(--border-color); background: rgba(255,255,255,0.02); color: var(--text-muted); cursor: pointer; border-radius: 6px; font-family: 'Inter', sans-serif; font-size: 13px; width: 100%; }
         input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
         option { background-color: var(--bg-main); color: var(--text-main); }
+        
+        .table-search { width: 100%; margin-bottom: 15px; }
 
         .btn { background-color: var(--border-color); color: var(--text-main); padding: 10px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.2s ease; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; font-size: 14px; white-space: nowrap; }
         .btn:hover { background-color: #475569; }
@@ -139,10 +151,10 @@
     <div class="mobile-overlay" id="mobileOverlay"></div>
 
     <div class="sidebar" id="sidebar">
-        <div class="brand">
+        <a href="https://github.com/Krimlocke/delegatarr-beta" target="_blank" rel="noopener noreferrer" class="brand" style="text-decoration: none; color: inherit;">
             <img src="{{ url_for('favicon') }}?v={{ version }}" class="brand-logo" alt="Logo">
             <span class="brand-text">Delegatarr</span>
-        </div>
+        </a>
 
         <div class="nav-menu">
             <a href="{{ url_for('trackers') }}" class="nav-link {% if active_page == 'trackers' %}active{% endif %}" title="Tracker Config">
@@ -198,7 +210,10 @@
             {% if messages %}
             <div class="flash-container">
                 {% for category, message in messages %}
-                <div class="flash {{ category }}">{{ message }}</div>
+                <div class="flash {{ category }}">
+                    <span style="flex-grow: 1;">{{ message }}</span>
+                    <button type="button" class="flash-close" aria-label="Close message" onclick="this.parentElement.remove()">&times;</button>
+                </div>
                 {% endfor %}
             </div>
             {% endif %}
@@ -208,30 +223,39 @@
         <div class="card">
             <form action="{{ url_for('update_groups') }}" method="POST">
                 <div class="card-header">
-                    <h3 class="card-title">Assign Tags to Trackers</h3>
-                    <select id="trackerFilter" onchange="filterTrackers()" style="width: 220px; padding: 6px 10px;">
+                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                        <h3 class="card-title">Assign Tags to Trackers</h3>
+                        <span id="trackerCount" style="font-size: 13px; color: var(--text-muted); font-weight: 500;"></span>
+                    </div>
+                    <select id="trackerFilter" aria-label="Filter trackers" style="width: 220px; padding: 6px 10px;">
                         <option value="all">Show All Current Trackers</option>
                         <option value="untagged">Show Not Tagged</option>
                         <option value="tagged">Show Current Tagged</option>
                     </select>
                 </div>
-
+                
+                <input type="text" id="trackerSearch" class="table-search" aria-label="Search trackers" placeholder="🔍 Search trackers or tags...">
+                
                 <div class="table-wrapper">
                     <table id="trackerTable">
-                        <tr>
-                            <th>Tracker Domain</th>
-                            <th>Active Torrents</th>
-                            <th>Tag Assignment</th>
-                        </tr>
-                        {% for tracker, count in tracker_summary.items() %}
-                        <tr class="tracker-row">
-                            <td style="font-weight: 500;">{{ tracker }}</td>
-                            <td>{{ count }}</td>
-                            <td><input type="text" class="tag-input" name="{{ tracker }}" value="{{ groups.get(tracker, '') }}" placeholder="Tag (or 'REMOVE')" style="width: 200px;"></td>
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 30px;">No active torrents found in Deluge.</td></tr>
-                        {% endfor %}
+                        <thead>
+                            <tr>
+                                <th class="sortable">Tracker Domain</th>
+                                <th class="sortable">Active Torrents</th>
+                                <th>Tag Assignment</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for tracker, count in tracker_summary.items() %}
+                            <tr class="tracker-row">
+                                <td style="font-weight: 500;">{{ tracker }}</td>
+                                <td>{{ count }}</td>
+                                <td><input type="text" class="tag-input" aria-label="Tag assignment for {{ tracker }}" name="{{ tracker }}" value="{{ groups.get(tracker, '') }}" placeholder="Tag (or 'REMOVE')" style="width: 200px;"></td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 30px;">No active torrents found in Deluge.</td></tr>
+                            {% endfor %}
+                        </tbody>
                     </table>
                 </div>
                 <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
@@ -239,36 +263,6 @@
                 </div>
             </form>
         </div>
-        <script>
-            function filterTrackers() {
-                try {
-                    const select = document.getElementById('trackerFilter');
-                    if (!select) return;
-                    const filter = select.value;
-                    localStorage.setItem('trackerFilterPref', filter);
-                    const rows = document.querySelectorAll('.tracker-row');
-                    rows.forEach(row => {
-                        const input = row.querySelector('.tag-input');
-                        if (!input) return;
-                        const isTagged = input.value.trim() !== '';
-                        if (filter === 'all') row.style.display = '';
-                        else if (filter === 'tagged' && isTagged) row.style.display = '';
-                        else if (filter === 'untagged' && !isTagged) row.style.display = '';
-                        else row.style.display = 'none';
-                    });
-                } catch(e) { console.error('Filter error:', e); }
-            }
-            window.addEventListener('DOMContentLoaded', () => {
-                setTimeout(() => {
-                    try {
-                        const savedFilter = localStorage.getItem('trackerFilterPref');
-                        const select = document.getElementById('trackerFilter');
-                        if (savedFilter && select) { select.value = savedFilter; }
-                        filterTrackers();
-                    } catch(e) {}
-                }, 50);
-            });
-        </script>
 
         {% elif active_page == 'rules' %}
         <div class="card">
@@ -277,35 +271,42 @@
             </div>
             <form action="{{ url_for('add_rule') }}" method="POST" style="margin-bottom: 30px; padding-bottom: 25px; border-bottom: 1px solid var(--border-color);">
                 <div class="form-row">
-                    <input list="tagList" name="group_id" placeholder="Target Tag" style="width: 120px;" required autocomplete="off">
+                    <input list="tagList" name="group_id" aria-label="Target Tag" placeholder="Target Tag" style="width: 120px;" required autocomplete="off">
                     <datalist id="tagList">{% for tag in unique_tags %}<option value="{{ tag }}">{% endfor %}</datalist>
 
-                    <input list="labelList" name="label" placeholder="Deluge Label" style="width: 120px;" required autocomplete="off">
+                    <input list="labelList" name="label" aria-label="Deluge Label" placeholder="Deluge Label" style="width: 120px;" required autocomplete="off">
                     <datalist id="labelList">{% for label in unique_labels %}<option value="{{ label }}">{% endfor %}</datalist>
 
-                    <select name="target_state" style="width: 120px;">
+                    <select name="target_state" aria-label="Target State" style="width: 120px;">
                         <option value="All">State: All</option>
                         <option value="Seeding">Seeding</option>
                         <option value="Paused">Paused</option>
                         <option value="Downloading">Downloading</option>
                     </select>
 
-                    <select name="time_metric" style="width: 170px;">
+                    <select name="time_metric" aria-label="Time Metric" style="width: 170px;">
                         <option value="seeding_time">Seeding Time ></option>
                         <option value="time_added">Time Since Added ></option>
                         <option value="time_paused">Time Paused ></option>
                     </select>
 
-                    <input type="number" name="threshold_value" placeholder="Time" step="any" style="width: 80px;" required>
-                    <select name="threshold_unit" style="width: 100px;">
+                    <input type="number" name="threshold_value" aria-label="Threshold Time" placeholder="Time" step="any" style="width: 80px;" required>
+                    <select name="threshold_unit" aria-label="Threshold Unit" style="width: 100px;">
                         <option value="minutes">Minutes</option>
                         <option value="hours" selected>Hours</option>
                         <option value="days">Days</option>
                     </select>
 
-                    <input type="number" name="min_torrents" placeholder="Min Keep" style="width: 90px;" value="0" required>
+                    <select name="logic_operator" aria-label="Logic Operator" style="width: 80px;" title="Logic Operator">
+                        <option value="OR">OR</option>
+                        <option value="AND">AND</option>
+                    </select>
 
-                    <select name="sort_order" style="width: 200px;">
+                    <input type="number" name="seed_ratio" aria-label="Seed Ratio" placeholder="Ratio >" step="0.01" min="0" style="width: 100px;" title="Leave blank to ignore ratio">
+
+                    <input type="number" name="min_torrents" aria-label="Minimum Torrents to Keep" placeholder="Min Keep" style="width: 90px;" value="0" required>
+
+                    <select name="sort_order" aria-label="Sort Order" style="width: 200px;">
                         <option value="oldest_added">Remove Oldest Added</option>
                         <option value="newest_added">Remove Newest Added</option>
                         <option value="longest_seeding">Remove Longest Seeding</option>
@@ -321,41 +322,62 @@
                 </div>
             </form>
 
-            <h3 class="card-title" style="margin-bottom: 15px;">Active Rules</h3>
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+                <h3 class="card-title" style="margin: 0;">Active Rules</h3>
+                <span id="rulesCount" style="font-size: 13px; color: var(--text-muted); font-weight: 500;"></span>
+            </div>
+            <input type="text" id="rulesSearch" class="table-search" aria-label="Search rules" placeholder="🔍 Search rules by tag, label, or state...">
+            
             <div class="table-wrapper">
-                <table>
-                    <tr>
-                        <th>Tag</th><th>Label</th><th>State</th><th>Metric</th><th>Threshold</th><th>Min Keep</th><th>Sorting Priority</th><th>Delete Data?</th><th></th>
-                    </tr>
-                    {% for rule in rules_list %}
-                    <tr>
-                        <td><strong style="color: var(--accent);">{{ rule.get('group_id') }}</strong></td>
-                        <td>{{ rule.get('label') }}</td>
-                        <td><span style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">{{ rule.get('target_state', 'All') }}</span></td>
-                        <td>
-                            {% if rule.get('time_metric') == 'time_added' %}Time Since Added
-                            {% elif rule.get('time_metric') == 'time_paused' %}Time Paused
-                            {% else %}Seeding Time{% endif %}
-                        </td>
-                        <td>> {{ "%g"|format(rule.get('threshold_value', rule.get('max_hours', 0)) | float) }} {{ rule.get('threshold_unit', 'hours') }}</td>
-                        <td>{{ rule.get('min_torrents', rule.get('min_keep', 0)) }}</td>
-                        <td style="color: var(--text-muted);">
-                            {% if rule.get('sort_order') == 'newest_added' or rule.get('sort_order') == 'newest_first' %}Newest Added
-                            {% elif rule.get('sort_order') == 'longest_seeding' %}Longest Seeding
-                            {% elif rule.get('sort_order') == 'shortest_seeding' %}Shortest Seeding
-                            {% else %}Oldest Added{% endif %}
-                        </td>
-                        <td>{% if rule.get('delete_data') %}<span class="status-badge-yes">YES</span>{% else %}<span class="status-badge-no">NO</span>{% endif %}</td>
-                        <td style="text-align: right;">
-                            <form action="{{ url_for('delete_rule', index=loop.index0) }}" method="POST" style="margin:0;"
-                                  onsubmit="return confirm('Delete this rule? This cannot be undone.');">
-                                <button type="submit" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;">Delete</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">No automation rules configured yet.</td></tr>
-                    {% endfor %}
+                <table id="rulesTable">
+                    <thead>
+                        <tr>
+                            <th class="sortable">Tag</th><th class="sortable">Label</th><th class="sortable">State</th><th class="sortable">Metric</th><th class="sortable">Threshold</th><th class="sortable">Min Keep</th><th>Sorting Priority</th><th>Delete Data?</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for rule in rules_list %}
+                        <tr>
+                            <td><strong style="color: var(--accent);">{{ rule.get('group_id') }}</strong></td>
+                            <td>{{ rule.get('label') }}</td>
+                            <td><span style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">{{ rule.get('target_state', 'All') }}</span></td>
+                            <td>
+                                {% if rule.get('time_metric') == 'time_added' %}Time Since Added
+                                {% elif rule.get('time_metric') == 'time_paused' %}Time Paused
+                                {% else %}Seeding Time{% endif %}
+                            </td>
+                            <td>
+                                > {{ "%g"|format(rule.get('threshold_value', rule.get('max_hours', 0)) | float) }} {{ rule.get('threshold_unit', 'hours') }}
+                                
+                                {% if rule.get('seed_ratio') is not none %}
+                                    <br>
+                                    <span style="font-size: 12px; color: var(--accent); font-weight: 600;">
+                                        {{ rule.get('logic_operator', 'OR') }}
+                                    </span> 
+                                    <span style="font-size: 13px; color: var(--text-muted);">
+                                        Ratio > {{ rule.get('seed_ratio') }}
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>{{ rule.get('min_torrents', rule.get('min_keep', 0)) }}</td>
+                            <td style="color: var(--text-muted);">
+                                {% if rule.get('sort_order') == 'newest_added' or rule.get('sort_order') == 'newest_first' %}Newest Added
+                                {% elif rule.get('sort_order') == 'longest_seeding' %}Longest Seeding
+                                {% elif rule.get('sort_order') == 'shortest_seeding' %}Shortest Seeding
+                                {% else %}Oldest Added{% endif %}
+                            </td>
+                            <td>{% if rule.get('delete_data') %}<span class="status-badge-yes">YES</span>{% else %}<span class="status-badge-no">NO</span>{% endif %}</td>
+                            <td style="text-align: right;">
+                                <form action="{{ url_for('delete_rule', index=loop.index0) }}" method="POST" style="margin:0;"
+                                      onsubmit="return confirm('Delete this rule? This cannot be undone.');">
+                                    <button type="submit" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">No automation rules configured yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
                 </table>
             </div>
         </div>
@@ -373,21 +395,21 @@
             <form action="{{ url_for('save_settings') }}" method="POST">
 
                 <div class="settings-group">
-                    <label class="settings-label">Engine Run Interval (Minutes)</label>
+                    <label class="settings-label" for="run_interval">Engine Run Interval (Minutes)</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">How often should Delegatarr run in the background to check the rules?</p>
-                    <input type="number" name="run_interval" value="{{ app_settings.get('run_interval', 15) }}" min="1" required style="width: 150px;">
+                    <input type="number" id="run_interval" name="run_interval" value="{{ app_settings.get('run_interval', 15) }}" min="1" required style="width: 150px;">
                 </div>
 
                 <div class="settings-group">
-                    <label class="settings-label">System Timezone</label>
+                    <label class="settings-label" for="tzSelect">System Timezone</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Used to correctly timestamp logs and trigger scheduled tasks.</p>
                     <select id="tzSelect" name="timezone" style="width: 250px;"></select>
                 </div>
 
                 <div class="settings-group">
-                    <label class="settings-label">Tracker Reading Mode</label>
+                    <label class="settings-label" for="tracker_mode">Tracker Reading Mode</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Should Delegatarr read all trackers attached to a torrent, or just the primary tracker?</p>
-                    <select name="tracker_mode" style="width: 250px;">
+                    <select id="tracker_mode" name="tracker_mode" style="width: 250px;">
                         <option value="all" {% if app_settings.get('tracker_mode', 'all') == 'all' %}selected{% endif %}>All Trackers</option>
                         <option value="top" {% if app_settings.get('tracker_mode', 'all') == 'top' %}selected{% endif %}>Primary Tracker</option>
                     </select>
@@ -396,7 +418,7 @@
                 <div class="settings-group">
                     <label class="settings-label" style="display: flex; align-items: center; gap: 8px;">
                         <input type="checkbox" name="dry_run" value="yes" {% if app_settings.get('dry_run') %}checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        Enable Dry Run Mode
+                        Enable Dry Run
                     </label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 5px; margin-bottom: 10px;">If enabled, Delegatarr will only log the torrents it WOULD remove, without actually deleting them from Deluge.</p>
                 </div>
@@ -417,7 +439,7 @@
                     <a href="{{ url_for('export_settings') }}" class="btn btn-primary">Export All Data</a>
 
                     <form action="{{ url_for('import_settings') }}" method="POST" enctype="multipart/form-data" style="margin: 0; display: flex; gap: 8px;">
-                        <input type="file" name="settings_file" accept=".json" required>
+                        <input type="file" name="settings_file" aria-label="Upload Backup JSON File" accept=".json" required>
                         <button type="submit" class="btn">Import</button>
                     </form>
                 </div>
@@ -434,7 +456,7 @@
 
                     <form action="{{ url_for('factory_reset_all') }}" method="POST" style="margin: 0; flex-grow: 1;" onsubmit="return confirm('CRITICAL WARNING: Are you absolutely sure? This will completely WIPE ALL Settings, Rules, and Tracker Tags. This cannot be undone!');">
                         <button type="submit" class="btn btn-danger-dark" title="Delete everything and start fresh">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
                                 <circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/>
                                 <path d="M8 20v2h8v-2"/><path d="m12.5 17-.5-1-.5 1h1z"/>
                                 <path d="M16 20a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20"/>
@@ -445,29 +467,14 @@
                 </div>
             </div>
         </div>
-
-        <script>
-            document.addEventListener('DOMContentLoaded', () => {
-                const tzSelect = document.getElementById('tzSelect');
-                if (tzSelect) {
-                    const timeZones = Intl.supportedValuesOf('timeZone');
-                    const currentTz = "{{ app_settings.get('timezone', 'UTC') }}";
-                    timeZones.forEach(tz => {
-                        const option = document.createElement('option');
-                        option.value = tz;
-                        option.textContent = tz;
-                        if (tz === currentTz) option.selected = true;
-                        tzSelect.appendChild(option);
-                    });
-                }
-            });
-        </script>
         {% endif %}
 
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            
+            // --- 1. Sidebar Toggle Mobile/Desktop ---
             const toggleBtn = document.getElementById('sidebarToggle');
             const mobileOverlay = document.getElementById('mobileOverlay');
 
@@ -487,33 +494,205 @@
                     document.body.classList.remove('mobile-sidebar-open');
                 });
             }
-        });
-    </script>
 
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register("{{ url_for('service_worker') }}")
-                    .then(reg => console.log('Service Worker registered'))
-                    .catch(err => console.log('Service Worker registration failed: ', err));
-            });
-        }
-    </script>
-    
-    <script>
-        // Auto-dismiss flash messages after 4 seconds
-        document.addEventListener('DOMContentLoaded', () => {
-            const flashes = document.querySelectorAll('.flash');
+            // --- 2. Service Worker ---
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register("{{ url_for('service_worker') }}").catch(() => {});
+            }
+
+            // --- 3. Smart Flash Messages ---
+            const flashes = document.querySelectorAll('.flash:not(.error)'); // Errors stay until manually closed
             if (flashes.length > 0) {
                 setTimeout(() => {
                     flashes.forEach(flash => {
                         flash.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
                         flash.style.opacity = '0';
                         flash.style.transform = 'translateY(-10px)';
-                        setTimeout(() => flash.remove(), 500); // Remove from DOM after fade
+                        setTimeout(() => flash.remove(), 500); 
                     });
                 }, 4000);
             }
+
+            // --- 4. Timezone Select Population ---
+            const tzSelect = document.getElementById('tzSelect');
+            if (tzSelect) {
+                const timeZones = (typeof Intl !== 'undefined' && Intl.supportedValuesOf) 
+                    ? Intl.supportedValuesOf('timeZone') 
+                    : ['UTC'];
+                const currentTz = {{ app_settings.get('timezone', 'UTC') | tojson }};
+                timeZones.forEach(tz => {
+                    const option = document.createElement('option');
+                    option.value = tz;
+                    option.textContent = tz;
+                    if (tz === currentTz) option.selected = true;
+                    tzSelect.appendChild(option);
+                });
+            }
+
+            // --- 5. Advanced Search & Filtering (with Debounce) ---
+            function debounce(func, wait) {
+                let timeout;
+                return function(...args) {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), wait);
+                };
+            }
+
+            const trackerFilter = document.getElementById('trackerFilter');
+            if (trackerFilter) {
+                trackerFilter.addEventListener('change', filterTrackers);
+                const savedFilter = localStorage.getItem('trackerFilterPref');
+                if (savedFilter) trackerFilter.value = savedFilter;
+                filterTrackers();
+            }
+
+            function filterTrackers() {
+                const select = document.getElementById('trackerFilter');
+                if (!select) return;
+                const filter = select.value;
+                localStorage.setItem('trackerFilterPref', filter);
+                
+                const rows = document.querySelectorAll('.tracker-row');
+                rows.forEach(row => {
+                    const input = row.querySelector('.tag-input');
+                    if (!input) return;
+                    const isTagged = input.value.trim() !== '';
+                    
+                    let shouldHide = false;
+                    if (filter === 'tagged' && !isTagged) shouldHide = true;
+                    else if (filter === 'untagged' && isTagged) shouldHide = true;
+                    
+                    row.dataset.filteredOut = shouldHide ? 'true' : 'false';
+                });
+                
+                triggerSearch('trackerSearch', 'trackerTable', 'trackerCount');
+            }
+
+            function triggerSearch(inputId, tableId, countId) {
+                const searchInput = document.getElementById(inputId);
+                const table = document.getElementById(tableId);
+                if (!searchInput || !table) return;
+
+                const filter = searchInput.value.toLowerCase();
+                const tbody = table.querySelector('tbody') || table;
+                const rows = tbody.querySelectorAll('tr');
+
+                let visibleCount = 0;
+                let filteredTotalCount = 0;
+
+                rows.forEach(row => {
+                    if (row.querySelector('th')) return; 
+                    if (row.cells.length === 1) return; // Skip "No rules" placeholder
+                    
+                    const isHiddenByDropdown = row.dataset.filteredOut === 'true';
+                    if (!isHiddenByDropdown) filteredTotalCount++;
+                    
+                    // Safely extract text without double-counting inputs
+                    const textCells = Array.from(row.cells).filter(cell => !cell.querySelector('input'));
+                    let text = textCells.map(c => c.textContent).join(' ').toLowerCase();
+                    row.querySelectorAll('input').forEach(input => text += ' ' + input.value.toLowerCase());
+
+                    if (text.includes(filter) && !isHiddenByDropdown) {
+                        row.style.display = '';
+                        visibleCount++;
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+
+                if (countId) {
+                    const countSpan = document.getElementById(countId);
+                    if (countSpan) {
+                        if (filteredTotalCount === 0) {
+                            countSpan.textContent = '';
+                        } else if (filter === '') {
+                            countSpan.textContent = `Showing ${filteredTotalCount} total`;
+                        } else {
+                            countSpan.textContent = `Showing ${visibleCount} of ${filteredTotalCount}`;
+                        }
+                    }
+                }
+            }
+
+            function setupTableSearch(inputId, tableId, countId) {
+                const searchInput = document.getElementById(inputId);
+                if (searchInput) {
+                    // Changed to 'input' to naturally catch pastes
+                    searchInput.addEventListener('input', debounce(() => triggerSearch(inputId, tableId, countId), 250));
+                    // Initial count population done completely synchronously
+                    triggerSearch(inputId, tableId, countId);
+                }
+            }
+
+            setupTableSearch('trackerSearch', 'trackerTable', 'trackerCount');
+            setupTableSearch('rulesSearch', 'rulesTable', 'rulesCount');
+
+            // --- 6. Dynamic Column Sorting ---
+            const getCellValue = (tr, idx) => {
+                const cell = tr.children[idx];
+                const input = cell.querySelector('input');
+                if (input) return input.value.trim();
+                return (cell.innerText || cell.textContent).trim();
+            };
+
+            const comparer = (idx, asc) => (a, b) => ((v1, v2) => 
+                v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2) ? 
+                v1 - v2 : 
+                v1.toString().localeCompare(v2, undefined, {numeric: true, sensitivity: 'base'})
+            )(getCellValue(asc ? a : b, idx), getCellValue(asc ? b : a, idx));
+
+            function performSort(table, columnIndex, asc) {
+                const tbody = table.querySelector('tbody') || table;
+                const rows = Array.from(tbody.querySelectorAll('tr')).filter(tr => !tr.querySelector('th'));
+
+                rows.sort(comparer(columnIndex, asc)).forEach(tr => tbody.appendChild(tr));
+
+                table.querySelectorAll('th.sortable').forEach(th => {
+                    th.classList.remove('sorted-asc', 'sorted-desc');
+                });
+                
+                const activeTh = table.querySelector(`th:nth-child(${columnIndex + 1})`);
+                if (activeTh) activeTh.classList.add(asc ? 'sorted-asc' : 'sorted-desc');
+            }
+
+            document.querySelectorAll('th.sortable').forEach(th => {
+                th.dataset.sortOrder = 'desc'; 
+                
+                th.addEventListener('click', function() {
+                    const table = th.closest('table');
+                    const columnIndex = Array.from(th.parentNode.children).indexOf(th);
+                    
+                    const isAsc = this.dataset.sortOrder !== 'asc';
+                    this.dataset.sortOrder = isAsc ? 'asc' : 'desc';
+
+                    performSort(table, columnIndex, isAsc);
+
+                    if (table.id) {
+                        localStorage.setItem(table.id + '_sortCol', columnIndex);
+                        localStorage.setItem(table.id + '_sortAsc', isAsc);
+                    }
+                });
+            });
+
+            // Restore Sort States safely
+            ['trackerTable', 'rulesTable'].forEach(tableId => {
+                const table = document.getElementById(tableId);
+                if (table) {
+                    const savedCol = localStorage.getItem(tableId + '_sortCol');
+                    const savedAsc = localStorage.getItem(tableId + '_sortAsc');
+                    
+                    if (savedCol !== null && savedAsc !== null) {
+                        const colIdx = parseInt(savedCol, 10);
+                        const isAsc = savedAsc === 'true';
+                        const targetTh = table.querySelector(`th:nth-child(${colIdx + 1})`);
+                        
+                        if (targetTh && targetTh.classList.contains('sortable')) {
+                            targetTh.dataset.sortOrder = isAsc ? 'asc' : 'desc';
+                            performSort(table, colIdx, isAsc);
+                        }
+                    }
+                }
+            });
         });
     </script>
 </body>
