@@ -1,17 +1,21 @@
-import os
+import io
 import json
+import logging
+import os
+import ssl
+import threading
 import time
 import urllib.request
-import threading
-import io
-import logging
-from logging.handlers import RotatingFileHandler
-from contextlib import contextmanager
-from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, send_file, flash
-from deluge_client import DelugeRPCClient
+
 from apscheduler.schedulers.background import BackgroundScheduler
+from contextlib import contextmanager
+from deluge_client import DelugeRPCClient
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, send_file, flash
+from logging.handlers import RotatingFileHandler
 from waitress import serve
+
+# --- VERSION CONTROL ---
+APP_VERSION = "2026.04.05"
 
 # --- INITIALIZE ENVIRONMENT ---
 os.makedirs('/config', exist_ok=True)
@@ -22,7 +26,7 @@ app = Flask(__name__)
 LOG_FILE = '/config/delegatarr.log'
 log_formatter = logging.Formatter('[%(asctime)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-file_handler = RotatingFileHandler(LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=1)
+file_handler = RotatingFileHandler(LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5)
 file_handler.setFormatter(log_formatter)
 
 console_handler = logging.StreamHandler()
@@ -44,11 +48,9 @@ else:
         app.secret_key = os.urandom(24)
         with open(SECRET_KEY_FILE, 'wb') as f:
             f.write(app.secret_key)
+        os.chmod(SECRET_KEY_FILE, 0o600)
 
 scheduler = BackgroundScheduler()
-
-# --- VERSION CONTROL ---
-APP_VERSION = "2026.04.04-Beta"
 
 # --- INFRASTRUCTURE CONFIGURATION ---
 DELUGE_HOST = os.environ.get('DELUGE_HOST', '')
@@ -62,9 +64,12 @@ GROUPS_FILE = '/config/groups.json'
 RULES_FILE = '/config/rules.json'
 SETTINGS_FILE = '/config/settings.json'
 
-# --- ENGINE CONCURRENCY LOCK ---
+# --- ENGINE CONCURRENCY & CACHING ---
 _engine_lock = threading.Lock()
+_cache_lock = threading.Lock()
+_config_lock = threading.Lock()
 SAFE_RETURN_URLS = {'/trackers', '/rules', '/logs', '/settings'}
+_deluge_status_cache = {'status': False, 'timestamp': 0}
 
 # --- HELPER FUNCTIONS ---
 def get_deluge_credentials():
@@ -94,22 +99,30 @@ def get_deluge_credentials():
 def get_deluge_client():
     user, password = get_deluge_credentials()
     client = DelugeRPCClient(DELUGE_HOST, DELUGE_PORT, user, password)
-    client.connect()
-    return client
+    
+    try:
+        client.connect()
+        return client
+    except ssl.SSLEOFError:
+        app.logger.warning("Deluge Error: Daemon is currently restarting and not ready for secure connections. Retrying later.")
+        return None
+    except Exception as e:
+        app.logger.error(f"Deluge Error: {str(e)}")
+        return None
 
 @contextmanager
 def deluge_session():
-    """Context manager for safe Deluge RPC connections."""
     client = None
     try:
         client = get_deluge_client()
+        if client is None:
+            raise ConnectionError("Could not establish Deluge connection.")
         yield client
     finally:
         if client and client.connected:
             client.disconnect()
 
 def wait_for_deluge(max_retries=12, delay_seconds=5):
-    """Polls Deluge on startup to prevent cold-boot connection errors."""
     if not DELUGE_HOST:
         app.logger.info("System: DELUGE_HOST not configured, skipping connection wait.")
         return False
@@ -121,11 +134,15 @@ def wait_for_deluge(max_retries=12, delay_seconds=5):
                 client.call('daemon.info')
             app.logger.info(f"System: Deluge connection established. (Attempt {attempt}/{max_retries})")
             return True
-        except Exception:
+        except Exception as e:
+            err_str = str(e).lower()
+            if "auth" in err_str or "login" in err_str or "password" in err_str:
+                app.logger.error(f"System Error: Deluge authentication failed. Please check credentials. ({e})")
+                break
             app.logger.warning(f"System: Deluge not ready yet (Attempt {attempt}/{max_retries}). Retrying in {delay_seconds}s...")
             time.sleep(delay_seconds)
 
-    app.logger.warning("System Warning: Deluge did not respond in time. Proceeding with startup, but scheduled runs may fail.")
+    app.logger.warning("System Warning: Deluge did not respond in time or authentication failed. Proceeding with startup, but scheduled runs may fail.")
     return False
 
 def load_json(filepath, default_val):
@@ -164,8 +181,9 @@ def download_default_logo():
     if not os.path.exists(logo_path):
         try:
             app.logger.info("System: Logo missing. Downloading default from GitHub...")
+            ctx = ssl.create_default_context()
             req = urllib.request.Request(logo_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=5) as response, open(logo_path, 'wb') as out_file:
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as response, open(logo_path, 'wb') as out_file:
                 out_file.write(response.read())
             app.logger.info("System: Default logo downloaded successfully.")
         except Exception as e:
@@ -174,11 +192,23 @@ def download_default_logo():
 def get_deluge_status():
     if not DELUGE_HOST:
         return False
+
+    global _deluge_status_cache
+    
+    with _cache_lock:
+        if time.time() - _deluge_status_cache['timestamp'] < 10:
+            return _deluge_status_cache['status']
+        _deluge_status_cache['timestamp'] = time.time()
+            
     try:
         with deluge_session() as client:
             client.call('daemon.info')
+        with _cache_lock:
+            _deluge_status_cache = {'status': True, 'timestamp': time.time()}
         return True
     except Exception:
+        with _cache_lock:
+            _deluge_status_cache = {'status': False, 'timestamp': time.time()}
         return False
 
 def get_dashboard_data():
@@ -201,9 +231,12 @@ def get_dashboard_data():
             if tracker_mode == 'top' and trackers_list:
                 trackers_list = [trackers_list[0]]
 
+            seen_domains = set()
             for raw_url in trackers_list:
                 domain = raw_url.split('/')[2] if '//' in raw_url else raw_url
-                summary[domain] = summary.get(domain, 0) + 1
+                if domain not in seen_domains:
+                    seen_domains.add(domain)
+                    summary[domain] = summary.get(domain, 0) + 1
 
         return summary, sorted(list(labels))
     except Exception as e:
@@ -221,6 +254,14 @@ def validate_rule(form):
         min_torrents = int(form.get('min_torrents', 0))
     except (ValueError, TypeError):
         return "Min Keep must be a valid integer."
+        
+    raw_ratio = form.get('seed_ratio')
+    if raw_ratio and raw_ratio.strip():
+        try:
+            ratio_val = float(raw_ratio)
+            if ratio_val < 0: return "Seed ratio cannot be negative."
+        except ValueError:
+            return "Seed ratio must be a valid number."
 
     if not group_id:
         return "Target Tag cannot be empty."
@@ -238,16 +279,13 @@ def process_torrents(run_type="Scheduled"):
         return
 
     try:
-        groups = load_json(GROUPS_FILE, {})
-        rules_list = load_json(RULES_FILE, [])
+        with _config_lock:
+            groups = load_json(GROUPS_FILE, {})
+            rules_list = load_json(RULES_FILE, [])
 
         if not rules_list or not groups:
             app.logger.info(f"{run_type} Engine Run: Skipped. No tags or rules are configured yet.")
             return
-
-        with deluge_session() as client:
-            fields = ['name', 'trackers', 'label', 'seeding_time', 'time_added', 'state', 'active_time']
-            torrents = client.call('core.get_torrents_status', {}, fields)
 
         current_time = time.time()
         settings = get_settings()
@@ -258,116 +296,134 @@ def process_torrents(run_type="Scheduled"):
         torrents_to_remove = []
         seen_ids = set()
 
-        for rule in rules_list:
-            target_group = rule.get('group_id', '')
-            target_label = rule.get('label', '')
-            target_state = rule.get('target_state', 'All')
-            time_metric = rule.get('time_metric', 'seeding_time')
+        with deluge_session() as client:
+            fields = ['name', 'trackers', 'label', 'seeding_time', 'time_added', 'state', 'active_time', 'ratio']
+            torrents = client.call('core.get_torrents_status', {}, fields)
 
-            try:
-                min_torrents = int(rule.get('min_torrents', rule.get('min_keep', 0)))
-            except (ValueError, TypeError):
-                min_torrents = 0
+            for rule in rules_list:
+                target_group = rule.get('group_id', '')
+                target_label = rule.get('label', '')
+                target_state = rule.get('target_state', 'All')
+                time_metric = rule.get('time_metric', 'seeding_time')
 
-            try:
-                threshold_val = float(rule.get('threshold_value', rule.get('max_hours', 0)))
-            except (ValueError, TypeError):
-                threshold_val = 0.0
+                try:
+                    min_torrents = int(rule.get('min_torrents', rule.get('min_keep', 0)))
+                except (ValueError, TypeError):
+                    min_torrents = 0
 
-            threshold_unit = rule.get('threshold_unit', 'hours')
+                try:
+                    threshold_val = float(rule.get('threshold_value', rule.get('max_hours', 0.0)))
+                except (ValueError, TypeError):
+                    threshold_val = 0.0
 
-            if threshold_unit == 'minutes':
-                rule_max_hours = threshold_val / 60.0
-            elif threshold_unit == 'days':
-                rule_max_hours = threshold_val * 24.0
-            else:
-                rule_max_hours = threshold_val
+                threshold_unit = rule.get('threshold_unit', 'hours')
 
-            sort_order = rule.get('sort_order', 'oldest_added')
-            if sort_order == 'oldest_first': sort_order = 'oldest_added'
-            if sort_order == 'newest_first': sort_order = 'newest_added'
+                if threshold_unit == 'minutes':
+                    rule_max_hours = threshold_val / 60.0
+                elif threshold_unit == 'days':
+                    rule_max_hours = threshold_val * 24.0
+                else:
+                    rule_max_hours = threshold_val
 
-            matching_torrents = []
+                sort_order = rule.get('sort_order', 'oldest_added')
+                matching_torrents = []
 
-            for tid, data in torrents.items():
-                name = data.get(b'name', b'').decode('utf-8', 'ignore')
-                label = data.get(b'label', b'').decode('utf-8', 'ignore')
-                state = data.get(b'state', b'').decode('utf-8', 'ignore')
+                for tid, data in torrents.items():
+                    name = data.get(b'name', b'').decode('utf-8', 'ignore')
+                    label = data.get(b'label', b'').decode('utf-8', 'ignore')
+                    state = data.get(b'state', b'').decode('utf-8', 'ignore')
 
-                seeding_hours = int(data.get(b'seeding_time') or 0) / 3600.0
-                time_added = int(data.get(b'time_added') or 0)
-                active_hours = int(data.get(b'active_time') or 0) / 3600.0
+                    seeding_hours = int(data.get(b'seeding_time') or 0) / 3600.0
+                    time_added = int(data.get(b'time_added') or 0)
+                    active_hours = int(data.get(b'active_time') or 0) / 3600.0
+                    ratio = float(data.get(b'ratio', 0.0))
 
-                total_age_hours = (current_time - time_added) / 3600.0
-                paused_hours = max(0.0, total_age_hours - active_hours)
+                    total_age_hours = (current_time - time_added) / 3600.0
+                    paused_hours = max(0.0, total_age_hours - active_hours)
 
-                if target_state != 'All' and state != target_state:
+                    if target_state != 'All' and state != target_state:
+                        continue
+
+                    trackers_list = [t.get(b'url', b'').decode('utf-8', 'ignore') for t in data.get(b'trackers', []) if t.get(b'url')]
+                    if not trackers_list:
+                        continue
+
+                    if tracker_mode == 'top':
+                        trackers_list = [trackers_list[0]]
+
+                    matched_group = False
+                    for raw_url in trackers_list:
+                        domain = raw_url.split('/')[2] if '//' in raw_url else raw_url
+                        if groups.get(domain) == target_group:
+                            matched_group = True
+                            break
+
+                    if matched_group and label.lower() == target_label.lower():
+                        if time_metric == 'time_added':
+                            trigger_value = total_age_hours
+                        elif time_metric == 'time_paused':
+                            trigger_value = paused_hours
+                        else:
+                            trigger_value = seeding_hours
+
+                        matching_torrents.append({
+                            'id': tid,
+                            'name': name,
+                            'seeding_hours': seeding_hours,
+                            'time_added': time_added,
+                            'trigger_value': trigger_value,
+                            'ratio': ratio
+                        })
+
+                if not matching_torrents:
                     continue
 
-                trackers_list = [t.get(b'url', b'').decode('utf-8', 'ignore') for t in data.get(b'trackers', []) if t.get(b'url')]
-                if not trackers_list:
-                    continue
+                if sort_order == 'oldest_added':
+                    matching_torrents.sort(key=lambda x: x['time_added'], reverse=False)
+                elif sort_order == 'newest_added':
+                    matching_torrents.sort(key=lambda x: x['time_added'], reverse=True)
+                elif sort_order == 'longest_seeding':
+                    matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=True)
+                elif sort_order == 'shortest_seeding':
+                    matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=False)
 
-                if tracker_mode == 'top':
-                    trackers_list = [trackers_list[0]]
+                candidates_for_removal = matching_torrents[min_torrents:] if min_torrents > 0 else matching_torrents
 
-                matched_group = False
-                for raw_url in trackers_list:
-                    domain = raw_url.split('/')[2] if '//' in raw_url else raw_url
-                    if groups.get(domain) == target_group:
-                        matched_group = True
-                        break
-
-                if matched_group and label.lower() == target_label.lower():
-                    if time_metric == 'time_added':
-                        trigger_value = total_age_hours
-                    elif time_metric == 'time_paused':
-                        trigger_value = paused_hours
+                for t in candidates_for_removal:
+                    if t['id'] in seen_ids:
+                        app.logger.debug(f"Skipping '{t['name']}': already queued for removal by an earlier rule.")
+                        continue
+                        
+                    time_condition_met = t['trigger_value'] >= rule_max_hours
+                    
+                    rule_ratio = rule.get('seed_ratio')
+                    if rule_ratio is not None:
+                        ratio_condition_met = t['ratio'] >= rule_ratio
+                        if rule.get('logic_operator') == 'AND':
+                            meets_removal_criteria = time_condition_met and ratio_condition_met
+                        else:
+                            meets_removal_criteria = time_condition_met or ratio_condition_met
                     else:
-                        trigger_value = seeding_hours
+                        meets_removal_criteria = time_condition_met
 
-                    matching_torrents.append({
-                        'id': tid,
-                        'name': name,
-                        'seeding_hours': seeding_hours,
-                        'time_added': time_added,
-                        'trigger_value': trigger_value
-                    })
+                    if meets_removal_criteria:
+                        seen_ids.add(t['id'])
+                        should_delete_data = rule.get('delete_data', False)
+                        torrents_to_remove.append({
+                            'id': t['id'],
+                            'name': t['name'],
+                            'tag': target_group,
+                            'state': target_state,
+                            'metric': time_metric,
+                            'delete_data': should_delete_data
+                        })
 
-            if not matching_torrents:
-                continue
-
-            if sort_order == 'oldest_added':
-                matching_torrents.sort(key=lambda x: x['time_added'], reverse=False)
-            elif sort_order == 'newest_added':
-                matching_torrents.sort(key=lambda x: x['time_added'], reverse=True)
-            elif sort_order == 'longest_seeding':
-                matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=True)
-            elif sort_order == 'shortest_seeding':
-                matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=False)
-
-            candidates_for_removal = matching_torrents[min_torrents:] if min_torrents > 0 else matching_torrents
-
-            for t in candidates_for_removal:
-                if t['trigger_value'] >= rule_max_hours and t['id'] not in seen_ids:
-                    seen_ids.add(t['id'])
-                    should_delete_data = rule.get('delete_data', False)
-                    torrents_to_remove.append({
-                        'id': t['id'],
-                        'name': t['name'],
-                        'tag': target_group,
-                        'state': target_state,
-                        'metric': time_metric,
-                        'delete_data': should_delete_data
-                    })
-
-        if torrents_to_remove:
-            if is_dry_run:
-                for t in torrents_to_remove:
-                    app.logger.info(f"[DRY RUN] Would have removed: '{t['name']}' (Tag: {t['tag']}, State: {t['state']}, Metric: {t['metric']}, Delete Data: {t['delete_data']})")
-                    removed_count += 1
-            else:
-                with deluge_session() as client:
+            if torrents_to_remove:
+                if is_dry_run:
+                    for t in torrents_to_remove:
+                        app.logger.info(f"[DRY RUN] Would have removed: '{t['name']}' (Tag: {t['tag']}, State: {t['state']}, Metric: {t['metric']}, Delete Data: {t['delete_data']})")
+                        removed_count += 1
+                else:
                     for t in torrents_to_remove:
                         try:
                             client.call('core.remove_torrent', t['id'], t['delete_data'])
@@ -385,11 +441,10 @@ def process_torrents(run_type="Scheduled"):
 
     except ConnectionResetError:
         app.logger.error("Engine Run: Skipped. Deluge actively refused the connection (Deluge possibly restarting).")
+    except (ssl.SSLEOFError, ssl.SSLError, EOFError, ConnectionRefusedError):
+        app.logger.error("Engine Run: Skipped. Lost connection to Deluge (Daemon likely offline).")
     except Exception as e:
-        if "EOF" in str(e) or "SSL" in str(e):
-            app.logger.error("Engine Run: Skipped. Lost connection to Deluge (Daemon likely offline).")
-        else:
-            app.logger.error(f"Background Task Error: {e}")
+        app.logger.error(f"Background Task Error: {e}")
     finally:
         _engine_lock.release()
 
@@ -397,6 +452,7 @@ def process_torrents(run_type="Scheduled"):
 def render_page(**kwargs):
     kwargs.setdefault('version', APP_VERSION)
     kwargs['deluge_connected'] = get_deluge_status()
+    kwargs.setdefault('app_settings', get_settings())
     return render_template('index.html', **kwargs)
 
 @app.route('/')
@@ -406,14 +462,16 @@ def index():
 @app.route('/trackers')
 def trackers():
     summary, _ = get_dashboard_data()
-    groups = load_json(GROUPS_FILE, {})
+    with _config_lock:
+        groups = load_json(GROUPS_FILE, {})
     return render_page(active_page='trackers', page_title='Tracker Configuration', tracker_summary=summary, groups=groups)
 
 @app.route('/rules')
 def rules():
     _, unique_labels = get_dashboard_data()
-    groups = load_json(GROUPS_FILE, {})
-    rules_list = load_json(RULES_FILE, [])
+    with _config_lock:
+        groups = load_json(GROUPS_FILE, {})
+        rules_list = load_json(RULES_FILE, [])
     unique_tags = sorted(list(set(tag for tag in groups.values() if tag.strip())))
     return render_page(active_page='rules', page_title='Removal Rules Engine', rules_list=rules_list, unique_tags=unique_tags, unique_labels=unique_labels)
 
@@ -438,7 +496,7 @@ def settings_page():
 @app.route('/save_settings', methods=['POST'])
 def save_settings():
     try:
-        new_interval = int(request.form.get('run_interval', 15))
+        new_interval = max(1, int(request.form.get('run_interval', 15)))
     except (ValueError, TypeError):
         new_interval = 15
 
@@ -452,7 +510,10 @@ def save_settings():
         'tracker_mode': new_tracker_mode,
         'dry_run': new_dry_run
     }
-    save_json(SETTINGS_FILE, settings_data)
+    
+    with _config_lock:
+        save_json(SETTINGS_FILE, settings_data)
+        
     apply_timezone(new_tz)
 
     try:
@@ -468,11 +529,12 @@ def save_settings():
 
 @app.route('/export_settings')
 def export_settings():
-    backup_data = {
-        'settings': load_json(SETTINGS_FILE, {}),
-        'rules': load_json(RULES_FILE, []),
-        'groups': load_json(GROUPS_FILE, {})
-    }
+    with _config_lock:
+        backup_data = {
+            'settings': load_json(SETTINGS_FILE, {}),
+            'rules': load_json(RULES_FILE, []),
+            'groups': load_json(GROUPS_FILE, {})
+        }
     mem_file = io.BytesIO()
     mem_file.write(json.dumps(backup_data, indent=4).encode('utf-8'))
     mem_file.seek(0)
@@ -483,14 +545,23 @@ def import_settings():
     if 'settings_file' in request.files:
         file = request.files['settings_file']
         if file.filename != '':
+            file_data = file.read()
+            if len(file_data) > 5 * 1024 * 1024:
+                flash("File too large. Upload limit is 5MB.", "error")
+                return redirect(url_for('settings_page'))
+            
             try:
-                data = json.loads(file.read().decode('utf-8'))
-                if 'settings' in data or 'rules' in data or 'groups' in data:
-                    if 'settings' in data: save_json(SETTINGS_FILE, data['settings'])
-                    if 'rules' in data: save_json(RULES_FILE, data['rules'])
-                    if 'groups' in data: save_json(GROUPS_FILE, data['groups'])
-                else:
-                    save_json(SETTINGS_FILE, data)
+                data = json.loads(file_data.decode('utf-8'))
+                with _config_lock:
+                    if 'settings' in data or 'rules' in data or 'groups' in data:
+                        if 'settings' in data and isinstance(data['settings'], dict): 
+                            save_json(SETTINGS_FILE, data['settings'])
+                        if 'rules' in data and isinstance(data['rules'], list): 
+                            save_json(RULES_FILE, data['rules'])
+                        if 'groups' in data and isinstance(data['groups'], dict): 
+                            save_json(GROUPS_FILE, data['groups'])
+                    elif isinstance(data, dict):
+                        save_json(SETTINGS_FILE, data)
                 app.logger.info("System: Full backup imported successfully.")
                 flash("Backup imported successfully.", "success")
             except Exception as e:
@@ -508,7 +579,8 @@ def factory_reset_settings():
         'tracker_mode': 'all',
         'dry_run': True
     }
-    save_json(SETTINGS_FILE, default_settings)
+    with _config_lock:
+        save_json(SETTINGS_FILE, default_settings)
     app.logger.info("System: Factory reset performed on application settings only.")
     flash("Settings reset to defaults. Rules and tags were not affected.", "warning")
     return redirect(url_for('settings_page'))
@@ -521,26 +593,29 @@ def factory_reset_all():
         'tracker_mode': 'all',
         'dry_run': True
     }
-    save_json(SETTINGS_FILE, default_settings)
-    save_json(RULES_FILE, [])
-    save_json(GROUPS_FILE, {})
+    with _config_lock:
+        save_json(SETTINGS_FILE, default_settings)
+        save_json(RULES_FILE, [])
+        save_json(GROUPS_FILE, {})
     app.logger.warning("System: CRITICAL - Full factory reset performed. All settings, rules, and tags have been wiped.")
     flash("Full factory reset complete. All settings, rules, and tags have been wiped.", "error")
     return redirect(url_for('settings_page'))
 
 @app.route('/update_groups', methods=['POST'])
 def update_groups():
-    groups = load_json(GROUPS_FILE, {})
-    for tracker, group_id in request.form.items():
-        clean_val = group_id.strip()
-        if not clean_val:
-            continue
-        if clean_val.upper() == 'REMOVE':
-            if tracker in groups:
-                del groups[tracker]
-        else:
-            groups[tracker] = clean_val
-    save_json(GROUPS_FILE, groups)
+    with _config_lock:
+        groups = load_json(GROUPS_FILE, {})
+        for tracker, group_id in request.form.items():
+            clean_val = group_id.strip()
+            if not clean_val:
+                continue
+            if clean_val.upper() == 'REMOVE':
+                if tracker in groups:
+                    del groups[tracker]
+            else:
+                groups[tracker] = clean_val
+        save_json(GROUPS_FILE, groups)
+        
     flash("Tracker tags saved.", "success")
     return redirect(url_for('trackers'))
 
@@ -551,19 +626,27 @@ def add_rule():
         flash(f"Rule not saved: {error}", "error")
         return redirect(url_for('rules'))
 
-    rules_list = load_json(RULES_FILE, [])
-
     try:
         threshold_value = float(request.form.get('threshold_value', 0))
     except (ValueError, TypeError):
         threshold_value = 0.0
 
-    threshold_unit = request.form.get('threshold_unit', 'hours')
-
     try:
         min_torrents = int(request.form.get('min_torrents', 0))
     except (ValueError, TypeError):
         min_torrents = 0
+
+    logic_operator = request.form.get('logic_operator', 'OR')
+    raw_ratio = request.form.get('seed_ratio')
+
+    try:
+        seed_ratio = float(raw_ratio) if raw_ratio and raw_ratio.strip() != "" else None
+    except ValueError:
+        seed_ratio = None
+
+    sort_order = request.form.get('sort_order', 'oldest_added')
+    if sort_order == 'oldest_first': sort_order = 'oldest_added'
+    if sort_order == 'newest_first': sort_order = 'newest_added'
 
     new_rule = {
         'group_id': request.form.get('group_id', '').strip(),
@@ -571,28 +654,36 @@ def add_rule():
         'target_state': request.form.get('target_state', 'All'),
         'time_metric': request.form.get('time_metric', 'seeding_time'),
         'min_torrents': min_torrents,
-        'sort_order': request.form.get('sort_order', 'oldest_added'),
+        'sort_order': sort_order,
         'threshold_value': threshold_value,
-        'threshold_unit': threshold_unit,
-        'delete_data': 'delete_data' in request.form
+        'threshold_unit': request.form.get('threshold_unit', 'hours'),
+        'delete_data': 'delete_data' in request.form,
+        'logic_operator': logic_operator,
+        'seed_ratio': seed_ratio
     }
-    rules_list.append(new_rule)
-    save_json(RULES_FILE, rules_list)
+
+    with _config_lock:
+        rules_list = load_json(RULES_FILE, [])
+        rules_list.append(new_rule)
+        save_json(RULES_FILE, rules_list)
+        
     flash("Rule added successfully.", "success")
     return redirect(url_for('rules'))
 
 @app.route('/delete_rule/<int:index>', methods=['POST'])
 def delete_rule(index):
-    rules_list = load_json(RULES_FILE, [])
-    if 0 <= index < len(rules_list):
-        rules_list.pop(index)
-        save_json(RULES_FILE, rules_list)
-        flash("Rule deleted.", "warning")
+    with _config_lock:
+        rules_list = load_json(RULES_FILE, [])
+        if 0 <= index < len(rules_list):
+            rules_list.pop(index)
+            save_json(RULES_FILE, rules_list)
+            flash("Rule deleted.", "warning")
+            
     return redirect(url_for('rules'))
 
 @app.route('/run_now', methods=['POST'])
 def run_now():
-    process_torrents(run_type="Manual")
+    threading.Thread(target=process_torrents, kwargs={'run_type': 'Manual'}, daemon=True).start()
     return_url = request.form.get('return_url', '/trackers')
     if return_url not in SAFE_RETURN_URLS:
         return_url = '/trackers'
