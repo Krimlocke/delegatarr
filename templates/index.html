@@ -12,6 +12,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
+            document.documentElement.classList.add('sidebar-collapsed');
+        }
+    </script>
+
     <style>
         :root {
             --bg-main: #0f172a; --bg-sidebar: #1e293b; --bg-card: #1e293b; --bg-input: #0f172a;
@@ -24,7 +31,7 @@
 
         /* DESKTOP SIDEBAR */
         .sidebar { width: 260px; flex-shrink: 0; background-color: var(--bg-sidebar); display: flex; flex-direction: column; border-right: 1px solid var(--border-color); z-index: 1000; transition: width 0.25s ease, left 0.3s ease; overflow: hidden; }
-        .brand { display: flex; align-items: center; padding: 20px 15px; height: 78px; border-bottom: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; }
+        .brand { display: flex; align-items: center; padding: 20px 15px; height: 78px; border-bottom: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-decoration: none; color: inherit; }
         .brand-logo { width: 32px; height: 32px; border-radius: 4px; flex-shrink: 0; object-fit: contain; }
         .brand-text { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; margin-left: 12px; }
         .nav-menu { display: flex; flex-direction: column; padding: 20px 15px; gap: 8px; flex-grow: 1; overflow-x: hidden; }
@@ -44,15 +51,17 @@
         .conn-status.disconnected { color: var(--danger); background: rgba(239, 68, 68, 0.08); }
         .conn-status.disconnected .dot { background-color: var(--danger); }
 
-        /* DESKTOP SIDEBAR COLLAPSED STATE */
-        body.sidebar-collapsed .sidebar { width: 72px; }
-        body.sidebar-collapsed .brand { justify-content: center; padding: 20px 0; }
-        body.sidebar-collapsed .nav-text, body.sidebar-collapsed .brand-text, body.sidebar-collapsed .version-tag { display: none !important; }
-        body.sidebar-collapsed .nav-link { justify-content: center; padding: 12px 0; }
-        body.sidebar-collapsed .nav-icon { margin-right: 0; }
-        body.sidebar-collapsed .nav-action { width: 42px; height: 42px; padding: 0; margin-left: auto; margin-right: auto; border-radius: 8px; }
-        body.sidebar-collapsed .conn-status { justify-content: center; padding: 10px 0; }
-        body.sidebar-collapsed .conn-status .conn-label { display: none; }
+        /* DESKTOP SIDEBAR COLLAPSED STATE (Targets html or body) */
+        .sidebar-collapsed .sidebar { width: 72px; }
+        .sidebar-collapsed .brand { justify-content: center; padding: 20px 0; }
+        .sidebar-collapsed .nav-text, .sidebar-collapsed .brand-text, .sidebar-collapsed .version-tag { display: none !important; }
+        .sidebar-collapsed .nav-link { justify-content: center; padding: 12px 0; }
+        .sidebar-collapsed .nav-icon { margin-right: 0; }
+        .sidebar-collapsed .nav-action { width: 42px; height: 42px; padding: 0; margin-left: auto; margin-right: auto; border-radius: 8px; }
+        .sidebar-collapsed .conn-status { justify-content: center; padding: 10px 0; }
+        .sidebar-collapsed .conn-status .conn-label { display: none; }
+        .sidebar-collapsed .icon-collapse { display: none; }
+        html:not(.sidebar-collapsed) .icon-expand { display: none; }
 
         .main-content { flex-grow: 1; padding: 0 40px 40px 40px; overflow-y: auto; position: relative; }
         .top-header { display: flex; align-items: center; gap: 15px; padding: 0 40px; margin: 0 -40px 20px -40px; height: 78px; position: sticky; top: 0; z-index: 1050; background-color: rgba(15, 23, 42, 0.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border-color); }
@@ -60,8 +69,6 @@
         .btn-toggle-sidebar { background: none; border: none; padding: 8px; cursor: pointer; color: var(--text-muted); border-radius: 6px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
         .btn-toggle-sidebar:hover { color: var(--text-main); background: rgba(255,255,255,0.05); }
         .btn-toggle-sidebar svg { width: 24px; height: 24px; }
-        body.sidebar-collapsed .icon-collapse { display: none; }
-        body:not(.sidebar-collapsed) .icon-expand { display: none; }
 
         /* FLASH MESSAGES */
         .flash-container { margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
@@ -91,7 +98,6 @@
         th.sortable.sorted-desc::after { content: '↓'; opacity: 1; color: var(--accent); }
 
         input[type="text"], input[type="number"], select { padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-input); color: var(--text-main); font-family: 'Inter', sans-serif; font-size: 14px; }
-        input[type="file"] { padding: 6px 10px; border: 1px dashed var(--border-color); background: rgba(255,255,255,0.02); color: var(--text-muted); cursor: pointer; border-radius: 6px; font-family: 'Inter', sans-serif; font-size: 13px; width: 100%; }
         input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
         option { background-color: var(--bg-main); color: var(--text-main); }
         
@@ -120,13 +126,13 @@
         @media (max-width: 768px) {
             body { flex-direction: column; }
             .sidebar { position: fixed; top: 0; bottom: 0; left: -260px; width: 260px !important; box-shadow: 4px 0 15px rgba(0,0,0,0.5); z-index: 2000; transition: left 0.3s ease; }
-            body.mobile-sidebar-open .sidebar { left: 0; }
-            body.mobile-sidebar-open .mobile-overlay { display: block; }
-            body.sidebar-collapsed .nav-text, body.sidebar-collapsed .brand-text, body.sidebar-collapsed .version-tag { display: block !important; }
-            body.sidebar-collapsed .conn-status .conn-label { display: inline !important; }
-            body.sidebar-collapsed .nav-link { justify-content: flex-start; padding: 12px 16px; }
-            body.sidebar-collapsed .nav-icon { margin-right: 12px; }
-            body.sidebar-collapsed .brand { justify-content: flex-start; padding: 20px 15px; }
+            html.mobile-sidebar-open .sidebar { left: 0; }
+            html.mobile-sidebar-open .mobile-overlay { display: block; }
+            .sidebar-collapsed .nav-text, .sidebar-collapsed .brand-text, .sidebar-collapsed .version-tag { display: block !important; }
+            .sidebar-collapsed .conn-status .conn-label { display: inline !important; }
+            .sidebar-collapsed .nav-link { justify-content: flex-start; padding: 12px 16px; }
+            .sidebar-collapsed .nav-icon { margin-right: 12px; }
+            .sidebar-collapsed .brand { justify-content: flex-start; padding: 20px 15px; }
             .main-content { padding: 0 15px 30px 15px; width: 100%; }
             .top-header { padding: 15px; margin: 0 -15px 10px -15px; }
             .page-header { font-size: 22px; }
@@ -137,21 +143,15 @@
             .data-management-row, .data-actions { flex-direction: column; width: 100%; align-items: stretch; }
             .data-actions form { display: flex; flex-direction: column; width: 100%; gap: 10px; }
             .btn { width: 100%; justify-content: center; }
-            #trackerFilter, .tag-input { width: 100% !important; }
+            #trackerFilter, .table-search { width: 100% !important; }
         }
     </style>
 </head>
 <body>
-    <script>
-        if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
-            document.body.classList.add('sidebar-collapsed');
-        }
-    </script>
-
     <div class="mobile-overlay" id="mobileOverlay"></div>
 
     <div class="sidebar" id="sidebar">
-        <a href="https://github.com/Krimlocke/delegatarr-beta" target="_blank" rel="noopener noreferrer" class="brand" style="text-decoration: none; color: inherit;">
+        <a href="https://github.com/Krimlocke/delegatarr-beta" target="_blank" rel="noopener noreferrer" class="brand">
             <img src="{{ url_for('favicon') }}?v={{ version }}" class="brand-logo" alt="Logo">
             <span class="brand-text">Delegatarr</span>
         </a>
@@ -193,7 +193,6 @@
     </div>
 
     <div class="main-content">
-
         <div class="top-header">
             <button type="button" class="btn-toggle-sidebar" id="sidebarToggle" title="Toggle Sidebar">
                 <svg class="icon-collapse" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -253,7 +252,7 @@
                                 <td><input type="text" class="tag-input" aria-label="Tag assignment for {{ tracker }}" name="{{ tracker }}" value="{{ groups.get(tracker, '') }}" placeholder="Tag (or 'REMOVE')" style="width: 200px;"></td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 30px;">No active torrents found in Deluge.</td></tr>
+                            <tr data-placeholder="true"><td colspan="3" style="text-align: center; color: var(--text-muted); padding: 30px;">No active torrents found in Deluge.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -269,54 +268,87 @@
             <div class="card-header">
                 <h3 class="card-title">Create New Rule</h3>
             </div>
+            
             <form action="{{ url_for('add_rule') }}" method="POST" style="margin-bottom: 30px; padding-bottom: 25px; border-bottom: 1px solid var(--border-color);">
-                <div class="form-row">
-                    <input list="tagList" name="group_id" aria-label="Target Tag" placeholder="Target Tag" style="width: 120px;" required autocomplete="off">
-                    <datalist id="tagList">{% for tag in unique_tags %}<option value="{{ tag }}">{% endfor %}</datalist>
+                <div class="form-row" style="align-items: flex-end;">
 
-                    <input list="labelList" name="label" aria-label="Deluge Label" placeholder="Deluge Label" style="width: 120px;" required autocomplete="off">
-                    <datalist id="labelList">{% for label in unique_labels %}<option value="{{ label }}">{% endfor %}</datalist>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Target Tag</label>
+                        <input list="tagList" name="group_id" aria-label="Target Tag" placeholder="Target Tag" style="width: 120px;" required autocomplete="off">
+                        <datalist id="tagList">{% for tag in unique_tags %}<option value="{{ tag }}">{% endfor %}</datalist>
+                    </div>
 
-                    <select name="target_state" aria-label="Target State" style="width: 120px;">
-                        <option value="All">State: All</option>
-                        <option value="Seeding">Seeding</option>
-                        <option value="Paused">Paused</option>
-                        <option value="Downloading">Downloading</option>
-                    </select>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Deluge Label</label>
+                        <input list="labelList" name="label" aria-label="Deluge Label" placeholder="Deluge Label" style="width: 120px;" required autocomplete="off">
+                        <datalist id="labelList">{% for label in unique_labels %}<option value="{{ label }}">{% endfor %}</datalist>
+                    </div>
 
-                    <select name="time_metric" aria-label="Time Metric" style="width: 170px;">
-                        <option value="seeding_time">Seeding Time ></option>
-                        <option value="time_added">Time Since Added ></option>
-                        <option value="time_paused">Time Paused ></option>
-                    </select>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Torrent State</label>
+                        <select name="target_state" aria-label="Target State" style="width: 120px;">
+                            <option value="All">State: All</option>
+                            <option value="Seeding">Seeding</option>
+                            <option value="Paused">Paused</option>
+                            <option value="Downloading">Downloading</option>
+                        </select>
+                    </div>
 
-                    <input type="number" name="threshold_value" aria-label="Threshold Time" placeholder="Time" step="any" style="width: 80px;" required>
-                    <select name="threshold_unit" aria-label="Threshold Unit" style="width: 100px;">
-                        <option value="minutes">Minutes</option>
-                        <option value="hours" selected>Hours</option>
-                        <option value="days">Days</option>
-                    </select>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Time Metric</label>
+                        <select name="time_metric" aria-label="Time Metric" style="width: 170px;">
+                            <option value="seeding_time">Seeding Time ></option>
+                            <option value="time_added">Time Since Added ></option>
+                            <option value="time_paused">Time Paused ></option>
+                        </select>
+                    </div>
 
-                    <select name="logic_operator" aria-label="Logic Operator" style="width: 80px;" title="Logic Operator">
-                        <option value="OR">OR</option>
-                        <option value="AND">AND</option>
-                    </select>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Time Threshold</label>
+                        <div style="display: flex; gap: 6px;">
+                            <input type="number" name="threshold_value" aria-label="Threshold Time" placeholder="Time" step="any" style="width: 80px;" required>
+                            <select name="threshold_unit" aria-label="Threshold Unit" style="width: 100px;">
+                                <option value="minutes">Minutes</option>
+                                <option value="hours" selected>Hours</option>
+                                <option value="days">Days</option>
+                            </select>
+                        </div>
+                    </div>
 
-                    <input type="number" name="seed_ratio" aria-label="Seed Ratio" placeholder="Ratio >" step="0.01" min="0" style="width: 100px;" title="Leave blank to ignore ratio">
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Condition</label>
+                        <select name="logic_operator" aria-label="Logic Operator" style="width: 80px;" title="Logic Operator">
+                            <option value="OR">OR</option>
+                            <option value="AND">AND</option>
+                        </select>
+                    </div>
 
-                    <input type="number" name="min_torrents" aria-label="Minimum Torrents to Keep" placeholder="Min Keep" style="width: 90px;" value="0" required>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Ratio Target</label>
+                        <input type="number" name="seed_ratio" aria-label="Seed Ratio" placeholder="Ratio >" step="0.01" min="0" style="width: 100px;" title="Leave blank to ignore ratio">
+                    </div>
 
-                    <select name="sort_order" aria-label="Sort Order" style="width: 200px;">
-                        <option value="oldest_added">Remove Oldest Added</option>
-                        <option value="newest_added">Remove Newest Added</option>
-                        <option value="longest_seeding">Remove Longest Seeding</option>
-                        <option value="shortest_seeding">Remove Shortest Seeding</option>
-                    </select>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Min Keep</label>
+                        <input type="number" name="min_torrents" aria-label="Minimum Torrents to Keep" placeholder="Min Keep" style="width: 90px;" value="0" required>
+                    </div>
 
-                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 500;">
-                        <input type="checkbox" name="delete_data" value="yes" style="width: 18px; height: 18px; accent-color: var(--danger);">
-                        Delete Data
-                    </label>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Removal Priority</label>
+                        <select name="sort_order" aria-label="Sort Order" style="width: 200px;">
+                            <option value="oldest_added">Remove Oldest Added</option>
+                            <option value="newest_added">Remove Newest Added</option>
+                            <option value="longest_seeding">Remove Longest Seeding</option>
+                            <option value="shortest_seeding">Remove Shortest Seeding</option>
+                        </select>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; justify-content: flex-end; margin-bottom: 8px;">
+                        <label style="display: flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer;">
+                            <input type="checkbox" name="delete_data" value="yes" style="width: 18px; height: 18px; accent-color: var(--danger); cursor: pointer;">
+                            Delete Data
+                        </label>
+                    </div>
 
                     <button type="submit" class="btn btn-primary" style="margin-left: auto;">+ Add Rule</button>
                 </div>
@@ -375,7 +407,7 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">No automation rules configured yet.</td></tr>
+                        <tr data-placeholder="true"><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">No automation rules configured yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -393,7 +425,6 @@
                 <h3 class="card-title">Application Settings</h3>
             </div>
             <form action="{{ url_for('save_settings') }}" method="POST">
-
                 <div class="settings-group">
                     <label class="settings-label" for="run_interval">Engine Run Interval (Minutes)</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">How often should Delegatarr run in the background to check the rules?</p>
@@ -403,7 +434,7 @@
                 <div class="settings-group">
                     <label class="settings-label" for="tzSelect">System Timezone</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Used to correctly timestamp logs and trigger scheduled tasks.</p>
-                    <select id="tzSelect" name="timezone" style="width: 250px;"></select>
+                    <select id="tzSelect" name="timezone" style="width: 250px;" data-current-tz="{{ app_settings.get('timezone', 'UTC') }}"></select>
                 </div>
 
                 <div class="settings-group">
@@ -438,9 +469,11 @@
                 <div class="data-actions">
                     <a href="{{ url_for('export_settings') }}" class="btn btn-primary">Export All Data</a>
 
-                    <form action="{{ url_for('import_settings') }}" method="POST" enctype="multipart/form-data" style="margin: 0; display: flex; gap: 8px;">
-                        <input type="file" name="settings_file" aria-label="Upload Backup JSON File" accept=".json" required>
-                        <button type="submit" class="btn">Import</button>
+                    <form action="{{ url_for('import_settings') }}" method="POST" enctype="multipart/form-data" style="margin: 0; display: flex; align-items: center; gap: 10px;">
+                        <input type="file" id="settingsUpload" name="settings_file" accept=".json" required style="display: none;">
+                        <label for="settingsUpload" class="btn" style="margin: 0; cursor: pointer;">Browse Files...</label>
+                        <span id="fileNameDisplay" style="font-size: 13px; color: var(--text-muted); max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">No file chosen</span>
+                        <button type="submit" class="btn btn-primary">Import</button>
                     </form>
                 </div>
             </div>
@@ -468,91 +501,168 @@
             </div>
         </div>
         {% endif %}
-
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            
-            // --- 1. Sidebar Toggle Mobile/Desktop ---
-            const toggleBtn = document.getElementById('sidebarToggle');
-            const mobileOverlay = document.getElementById('mobileOverlay');
+        /**
+         * Delegatarr UI Object
+         * Encapsulates frontend logic to prevent scope pollution and fragile DOM lookups.
+         */
+        const DelegatarrUI = {
+            init() {
+                this.cacheDOM();
+                this.bindEvents();
+                this.initServiceWorker();
+                this.initFlashMessages();
+                this.initTimezoneSelect();
+                this.initTableFeatures();
+            },
 
-            if (toggleBtn) {
-                toggleBtn.addEventListener('click', () => {
-                    if (window.innerWidth <= 768) {
-                        document.body.classList.toggle('mobile-sidebar-open');
-                    } else {
-                        document.body.classList.toggle('sidebar-collapsed');
-                        localStorage.setItem('sidebarCollapsed', document.body.classList.contains('sidebar-collapsed'));
-                    }
-                });
-            }
+            cacheDOM() {
+                this.htmlRoot = document.documentElement;
+                this.sidebarToggle = document.getElementById('sidebarToggle');
+                this.mobileOverlay = document.getElementById('mobileOverlay');
+                this.trackerFilter = document.getElementById('trackerFilter');
+                this.trackerSearch = document.getElementById('trackerSearch');
+                this.trackerTable = document.getElementById('trackerTable');
+                this.trackerCount = document.getElementById('trackerCount');
+                this.rulesSearch = document.getElementById('rulesSearch');
+                this.rulesTable = document.getElementById('rulesTable');
+                this.rulesCount = document.getElementById('rulesCount');
+                this.fileInput = document.getElementById('settingsUpload');
+                this.fileNameDisplay = document.getElementById('fileNameDisplay');
+                this.tzSelect = document.getElementById('tzSelect');
+            },
 
-            if (mobileOverlay) {
-                mobileOverlay.addEventListener('click', () => {
-                    document.body.classList.remove('mobile-sidebar-open');
-                });
-            }
-
-            // --- 2. Service Worker ---
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register("{{ url_for('service_worker') }}").catch(() => {});
-            }
-
-            // --- 3. Smart Flash Messages ---
-            const flashes = document.querySelectorAll('.flash:not(.error)'); // Errors stay until manually closed
-            if (flashes.length > 0) {
-                setTimeout(() => {
-                    flashes.forEach(flash => {
-                        flash.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
-                        flash.style.opacity = '0';
-                        flash.style.transform = 'translateY(-10px)';
-                        setTimeout(() => flash.remove(), 500); 
+            bindEvents() {
+                if (this.sidebarToggle) {
+                    this.sidebarToggle.addEventListener('click', () => this.toggleSidebar());
+                }
+                
+                if (this.mobileOverlay) {
+                    this.mobileOverlay.addEventListener('click', () => {
+                        this.htmlRoot.classList.remove('mobile-sidebar-open');
                     });
-                }, 4000);
-            }
+                }
 
-            // --- 4. Timezone Select Population ---
-            const tzSelect = document.getElementById('tzSelect');
-            if (tzSelect) {
+                if (this.trackerFilter) {
+                    this.trackerFilter.addEventListener('change', () => this.filterTrackers());
+                }
+
+                if (this.fileInput && this.fileNameDisplay) {
+                    this.fileInput.addEventListener('change', (e) => {
+                        this.fileNameDisplay.textContent = e.target.files.length > 0 ? e.target.files[0].name : 'No file chosen';
+                    });
+                }
+            },
+
+            toggleSidebar() {
+                if (window.innerWidth <= 768) {
+                    this.htmlRoot.classList.toggle('mobile-sidebar-open');
+                } else {
+                    this.htmlRoot.classList.toggle('sidebar-collapsed');
+                    localStorage.setItem('sidebarCollapsed', this.htmlRoot.classList.contains('sidebar-collapsed'));
+                }
+            },
+
+            initServiceWorker() {
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.register("{{ url_for('service_worker') }}").catch(() => {});
+                }
+            },
+
+            initFlashMessages() {
+                const flashes = document.querySelectorAll('.flash:not(.error)');
+                if (flashes.length > 0) {
+                    setTimeout(() => {
+                        flashes.forEach(flash => {
+                            flash.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+                            flash.style.opacity = '0';
+                            flash.style.transform = 'translateY(-10px)';
+                            setTimeout(() => flash.remove(), 500); 
+                        });
+                    }, 4000);
+                }
+            },
+
+            initTimezoneSelect() {
+                if (!this.tzSelect) return;
+                
                 const timeZones = (typeof Intl !== 'undefined' && Intl.supportedValuesOf) 
                     ? Intl.supportedValuesOf('timeZone') 
                     : ['UTC'];
-                const currentTz = {{ app_settings.get('timezone', 'UTC') | tojson }};
+                    
+                const currentTz = this.tzSelect.dataset.currentTz || 'UTC';
+                
                 timeZones.forEach(tz => {
                     const option = document.createElement('option');
                     option.value = tz;
                     option.textContent = tz;
                     if (tz === currentTz) option.selected = true;
-                    tzSelect.appendChild(option);
+                    this.tzSelect.appendChild(option);
                 });
-            }
+            },
 
-            // --- 5. Advanced Search & Filtering (with Debounce) ---
-            function debounce(func, wait) {
+            initTableFeatures() {
+                // 1. Setup search listeners (don't run initial search for trackers yet)
+                if (this.trackerSearch && this.trackerTable) {
+                    this.setupTableSearch(this.trackerSearch, this.trackerTable, this.trackerCount, false);
+                }
+
+                if (this.rulesSearch && this.rulesTable) {
+                    this.setupTableSearch(this.rulesSearch, this.rulesTable, this.rulesCount, true);
+                }
+
+                // 2. Initialize Tracker Filtering (this triggers the initial search for the tracker table)
+                if (this.trackerFilter) {
+                    const savedFilter = localStorage.getItem('trackerFilterPref');
+                    if (savedFilter) this.trackerFilter.value = savedFilter;
+                    this.filterTrackers(); 
+                }
+
+                // 3. Initialize Sorting
+                document.querySelectorAll('th.sortable').forEach(th => {
+                    th.dataset.sortOrder = 'desc'; 
+                    th.addEventListener('click', (e) => this.handleSortClick(e.currentTarget));
+                });
+
+                // Restore Sort States safely
+                [this.trackerTable, this.rulesTable].forEach(table => {
+                    if (table && table.id) {
+                        const savedCol = localStorage.getItem(table.id + '_sortCol');
+                        const savedAsc = localStorage.getItem(table.id + '_sortAsc');
+                        
+                        if (savedCol !== null && savedAsc !== null) {
+                            const colIdx = parseInt(savedCol, 10);
+                            const isAsc = savedAsc === 'true';
+                            const targetTh = table.querySelector(`th:nth-child(${colIdx + 1})`);
+                            
+                            if (targetTh && targetTh.classList.contains('sortable')) {
+                                targetTh.dataset.sortOrder = isAsc ? 'asc' : 'desc';
+                                this.performSort(table, colIdx, isAsc);
+                            }
+                        }
+                    }
+                });
+            },
+
+            // UTILITIES 
+
+            debounce(func, wait) {
                 let timeout;
-                return function(...args) {
+                // Use arrow function to guarantee lexical 'this' binding
+                return (...args) => {
                     clearTimeout(timeout);
                     timeout = setTimeout(() => func.apply(this, args), wait);
                 };
-            }
+            },
 
-            const trackerFilter = document.getElementById('trackerFilter');
-            if (trackerFilter) {
-                trackerFilter.addEventListener('change', filterTrackers);
-                const savedFilter = localStorage.getItem('trackerFilterPref');
-                if (savedFilter) trackerFilter.value = savedFilter;
-                filterTrackers();
-            }
-
-            function filterTrackers() {
-                const select = document.getElementById('trackerFilter');
-                if (!select) return;
-                const filter = select.value;
+            filterTrackers() {
+                if (!this.trackerFilter || !this.trackerTable) return;
+                const filter = this.trackerFilter.value;
                 localStorage.setItem('trackerFilterPref', filter);
                 
-                const rows = document.querySelectorAll('.tracker-row');
+                const rows = this.trackerTable.querySelectorAll('.tracker-row');
                 rows.forEach(row => {
                     const input = row.querySelector('.tag-input');
                     if (!input) return;
@@ -565,12 +675,21 @@
                     row.dataset.filteredOut = shouldHide ? 'true' : 'false';
                 });
                 
-                triggerSearch('trackerSearch', 'trackerTable', 'trackerCount');
-            }
+                this.triggerSearch(this.trackerSearch, this.trackerTable, this.trackerCount);
+            },
 
-            function triggerSearch(inputId, tableId, countId) {
-                const searchInput = document.getElementById(inputId);
-                const table = document.getElementById(tableId);
+            setupTableSearch(searchInput, table, countElement, runImmediately = true) {
+                if (!searchInput) return;
+                searchInput.addEventListener('input', this.debounce(() => {
+                    this.triggerSearch(searchInput, table, countElement);
+                }, 250));
+                
+                if (runImmediately) {
+                    this.triggerSearch(searchInput, table, countElement);
+                }
+            },
+
+            triggerSearch(searchInput, table, countElement) {
                 if (!searchInput || !table) return;
 
                 const filter = searchInput.value.toLowerCase();
@@ -582,7 +701,9 @@
 
                 rows.forEach(row => {
                     if (row.querySelector('th')) return; 
-                    if (row.cells.length === 1) return; // Skip "No rules" placeholder
+                    
+                    // Explicitly check for our encoded intent to skip placeholder rows
+                    if (row.dataset.placeholder === 'true') return;
                     
                     const isHiddenByDropdown = row.dataset.filteredOut === 'true';
                     if (!isHiddenByDropdown) filteredTotalCount++;
@@ -600,52 +721,54 @@
                     }
                 });
 
-                if (countId) {
-                    const countSpan = document.getElementById(countId);
-                    if (countSpan) {
-                        if (filteredTotalCount === 0) {
-                            countSpan.textContent = '';
-                        } else if (filter === '') {
-                            countSpan.textContent = `Showing ${filteredTotalCount} total`;
-                        } else {
-                            countSpan.textContent = `Showing ${visibleCount} of ${filteredTotalCount}`;
-                        }
+                if (countElement) {
+                    if (filteredTotalCount === 0) {
+                        countElement.textContent = '';
+                    } else if (filter === '') {
+                        countElement.textContent = `Showing ${filteredTotalCount} total`;
+                    } else {
+                        countElement.textContent = `Showing ${visibleCount} of ${filteredTotalCount}`;
                     }
                 }
-            }
+            },
 
-            function setupTableSearch(inputId, tableId, countId) {
-                const searchInput = document.getElementById(inputId);
-                if (searchInput) {
-                    // Changed to 'input' to naturally catch pastes
-                    searchInput.addEventListener('input', debounce(() => triggerSearch(inputId, tableId, countId), 250));
-                    // Initial count population done completely synchronously
-                    triggerSearch(inputId, tableId, countId);
-                }
-            }
-
-            setupTableSearch('trackerSearch', 'trackerTable', 'trackerCount');
-            setupTableSearch('rulesSearch', 'rulesTable', 'rulesCount');
-
-            // --- 6. Dynamic Column Sorting ---
-            const getCellValue = (tr, idx) => {
+            getCellValue(tr, idx) {
                 const cell = tr.children[idx];
                 const input = cell.querySelector('input');
                 if (input) return input.value.trim();
                 return (cell.innerText || cell.textContent).trim();
-            };
+            },
 
-            const comparer = (idx, asc) => (a, b) => ((v1, v2) => 
-                v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2) ? 
-                v1 - v2 : 
-                v1.toString().localeCompare(v2, undefined, {numeric: true, sensitivity: 'base'})
-            )(getCellValue(asc ? a : b, idx), getCellValue(asc ? b : a, idx));
+            comparer(idx, asc) {
+                // Explicitly reference DelegatarrUI to make context loss impossible
+                return (a, b) => ((v1, v2) => 
+                    v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2) ? 
+                    v1 - v2 : 
+                    v1.toString().localeCompare(v2, undefined, {numeric: true, sensitivity: 'base'})
+                )(DelegatarrUI.getCellValue(asc ? a : b, idx), DelegatarrUI.getCellValue(asc ? b : a, idx));
+            },
 
-            function performSort(table, columnIndex, asc) {
+            handleSortClick(th) {
+                const table = th.closest('table');
+                const columnIndex = Array.from(th.parentNode.children).indexOf(th);
+                
+                const isAsc = th.dataset.sortOrder !== 'asc';
+                th.dataset.sortOrder = isAsc ? 'asc' : 'desc';
+
+                this.performSort(table, columnIndex, isAsc);
+
+                if (table.id) {
+                    localStorage.setItem(table.id + '_sortCol', columnIndex);
+                    localStorage.setItem(table.id + '_sortAsc', isAsc);
+                }
+            },
+
+            performSort(table, columnIndex, asc) {
                 const tbody = table.querySelector('tbody') || table;
                 const rows = Array.from(tbody.querySelectorAll('tr')).filter(tr => !tr.querySelector('th'));
 
-                rows.sort(comparer(columnIndex, asc)).forEach(tr => tbody.appendChild(tr));
+                // Pass the safe comparer
+                rows.sort(this.comparer(columnIndex, asc)).forEach(tr => tbody.appendChild(tr));
 
                 table.querySelectorAll('th.sortable').forEach(th => {
                     th.classList.remove('sorted-asc', 'sorted-desc');
@@ -654,46 +777,10 @@
                 const activeTh = table.querySelector(`th:nth-child(${columnIndex + 1})`);
                 if (activeTh) activeTh.classList.add(asc ? 'sorted-asc' : 'sorted-desc');
             }
+        };
 
-            document.querySelectorAll('th.sortable').forEach(th => {
-                th.dataset.sortOrder = 'desc'; 
-                
-                th.addEventListener('click', function() {
-                    const table = th.closest('table');
-                    const columnIndex = Array.from(th.parentNode.children).indexOf(th);
-                    
-                    const isAsc = this.dataset.sortOrder !== 'asc';
-                    this.dataset.sortOrder = isAsc ? 'asc' : 'desc';
-
-                    performSort(table, columnIndex, isAsc);
-
-                    if (table.id) {
-                        localStorage.setItem(table.id + '_sortCol', columnIndex);
-                        localStorage.setItem(table.id + '_sortAsc', isAsc);
-                    }
-                });
-            });
-
-            // Restore Sort States safely
-            ['trackerTable', 'rulesTable'].forEach(tableId => {
-                const table = document.getElementById(tableId);
-                if (table) {
-                    const savedCol = localStorage.getItem(tableId + '_sortCol');
-                    const savedAsc = localStorage.getItem(tableId + '_sortAsc');
-                    
-                    if (savedCol !== null && savedAsc !== null) {
-                        const colIdx = parseInt(savedCol, 10);
-                        const isAsc = savedAsc === 'true';
-                        const targetTh = table.querySelector(`th:nth-child(${colIdx + 1})`);
-                        
-                        if (targetTh && targetTh.classList.contains('sortable')) {
-                            targetTh.dataset.sortOrder = isAsc ? 'asc' : 'desc';
-                            performSort(table, colIdx, isAsc);
-                        }
-                    }
-                }
-            });
-        });
+        // Initialize application UI
+        document.addEventListener('DOMContentLoaded', () => DelegatarrUI.init());
     </script>
 </body>
 </html>
