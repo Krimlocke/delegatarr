@@ -1,4 +1,4 @@
-deluge-client
-Flask
-apscheduler
-waitress
+Flask>=3.0.0
+deluge-client>=1.9.0
+APScheduler>=3.10.0
+waitress>=3.0.0
