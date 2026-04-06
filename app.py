@@ -385,13 +385,17 @@ def process_torrents(run_type="Scheduled"):
                     continue
 
                 if sort_order == 'oldest_added':
-                    matching_torrents.sort(key=lambda x: x['time_added'], reverse=False)
+                    # Protects newest at the top, pushes oldest to the bottom for removal
+                    matching_torrents.sort(key=lambda x: x['time_added'], reverse=True) 
                 elif sort_order == 'newest_added':
-                    matching_torrents.sort(key=lambda x: x['time_added'], reverse=True)
+                    # Protects oldest at the top, pushes newest to the bottom for removal
+                    matching_torrents.sort(key=lambda x: x['time_added'], reverse=False) 
                 elif sort_order == 'longest_seeding':
-                    matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=True)
+                    # Protects shortest seeding at the top, pushes longest seeding to the bottom for removal
+                    matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=False) 
                 elif sort_order == 'shortest_seeding':
-                    matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=False)
+                    # Protects longest seeding at the top, pushes shortest seeding to the bottom for removal
+                    matching_torrents.sort(key=lambda x: x['seeding_hours'], reverse=True)
 
                 candidates_for_removal = matching_torrents[min_torrents:] if min_torrents > 0 else matching_torrents
 
