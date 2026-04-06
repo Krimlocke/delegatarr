@@ -29,6 +29,15 @@
         * { box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; margin: 0; background-color: var(--bg-main); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
 
+        /* TOGGLE SWITCH */
+        .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; margin: 0; flex-shrink: 0; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #475569; transition: .3s; border-radius: 24px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2); }
+        .toggle-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+        .toggle-switch input:focus + .toggle-slider { box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3); }
+        .toggle-switch input:checked + .toggle-slider { background-color: var(--accent); }
+        .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
+        
         /* DESKTOP SIDEBAR */
         .sidebar { width: 260px; flex-shrink: 0; background-color: var(--bg-sidebar); display: flex; flex-direction: column; border-right: 1px solid var(--border-color); z-index: 1000; transition: width 0.25s ease, left 0.3s ease; overflow: hidden; }
         .brand { display: flex; align-items: center; padding: 20px 15px; height: 78px; border-bottom: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-decoration: none; color: inherit; }
@@ -151,7 +160,7 @@
     <div class="mobile-overlay" id="mobileOverlay"></div>
 
     <div class="sidebar" id="sidebar">
-        <a href="https://github.com/Krimlocke/delegatarr-beta" target="_blank" rel="noopener noreferrer" class="brand">
+        <a href="https://github.com/Krimlocke/delegatarr" target="_blank" rel="noopener noreferrer" class="brand">
             <img src="{{ url_for('favicon') }}?v={{ version }}" class="brand-logo" alt="Logo">
             <span class="brand-text">Delegatarr</span>
         </a>
@@ -182,6 +191,7 @@
             </div>
 
             <form action="{{ url_for('run_now') }}" method="POST" style="margin: 0;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <input type="hidden" name="return_url" value="{{ request.path }}">
                 <button type="submit" class="nav-link nav-action" title="Run Engine Now">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347c-.75.412-1.667-.13-1.667-.986V5.653z" /></svg>
@@ -221,6 +231,7 @@
         {% if active_page == 'trackers' %}
         <div class="card">
             <form action="{{ url_for('update_groups') }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div class="card-header">
                     <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
                         <h3 class="card-title">Assign Tags to Trackers</h3>
@@ -270,23 +281,24 @@
             </div>
             
             <form action="{{ url_for('add_rule') }}" method="POST" style="margin-bottom: 30px; padding-bottom: 25px; border-bottom: 1px solid var(--border-color);">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div class="form-row" style="align-items: flex-end;">
 
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 140px;">
                         <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Target Tag</label>
-                        <input list="tagList" name="group_id" aria-label="Target Tag" placeholder="Target Tag" style="width: 120px;" required autocomplete="off">
+                        <input type="text" list="tagList" name="group_id" aria-label="Target Tag" placeholder="Target Tag" style="width: 100%;" required autocomplete="off">
                         <datalist id="tagList">{% for tag in unique_tags %}<option value="{{ tag }}">{% endfor %}</datalist>
                     </div>
 
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 140px;">
                         <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Deluge Label</label>
-                        <input list="labelList" name="label" aria-label="Deluge Label" placeholder="Deluge Label" style="width: 120px;" required autocomplete="off">
+                        <input type="text" list="labelList" name="label" aria-label="Deluge Label" placeholder="Deluge Label" style="width: 100%;" required autocomplete="off">
                         <datalist id="labelList">{% for label in unique_labels %}<option value="{{ label }}">{% endfor %}</datalist>
                     </div>
 
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 140px;">
                         <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Torrent State</label>
-                        <select name="target_state" aria-label="Target State" style="width: 120px;">
+                        <select name="target_state" aria-label="Target State" style="width: 100%;">
                             <option value="All">State: All</option>
                             <option value="Seeding">Seeding</option>
                             <option value="Paused">Paused</option>
@@ -294,27 +306,27 @@
                         </select>
                     </div>
 
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; flex: 1.5; min-width: 160px;">
                         <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Time Metric</label>
-                        <select name="time_metric" aria-label="Time Metric" style="width: 170px;">
+                        <select name="time_metric" aria-label="Time Metric" style="width: 100%;">
                             <option value="seeding_time">Seeding Time ></option>
                             <option value="time_added">Time Since Added ></option>
                             <option value="time_paused">Time Paused ></option>
                         </select>
                     </div>
 
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; flex: 1.5; min-width: 180px;">
                         <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Time Threshold</label>
                         <div style="display: flex; gap: 6px;">
-                            <input type="number" name="threshold_value" aria-label="Threshold Time" placeholder="Time" step="any" style="width: 80px;" required>
-                            <select name="threshold_unit" aria-label="Threshold Unit" style="width: 100px;">
+                            <input type="number" name="threshold_value" aria-label="Threshold Time" placeholder="Time" step="any" style="flex: 1; min-width: 70px;" required>
+                            <select name="threshold_unit" aria-label="Threshold Unit" style="flex: 1.2; min-width: 90px;">
                                 <option value="minutes">Minutes</option>
                                 <option value="hours" selected>Hours</option>
                                 <option value="days">Days</option>
                             </select>
                         </div>
                     </div>
-
+                    
                     <div style="display: flex; flex-direction: column; gap: 4px;">
                         <label style="font-size: 12px; color: var(--text-muted); margin-left: 2px; font-weight: 500;">Condition</label>
                         <select name="logic_operator" aria-label="Logic Operator" style="width: 80px;" title="Logic Operator">
@@ -343,13 +355,14 @@
                         </select>
                     </div>
 
-                    <div style="display: flex; flex-direction: column; justify-content: flex-end; margin-bottom: 8px;">
-                        <label style="display: flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer;">
-                            <input type="checkbox" name="delete_data" value="yes" style="width: 18px; height: 18px; accent-color: var(--danger); cursor: pointer;">
-                            Delete Data
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px; padding-left: 8px;">
+                        <label for="delete_data_toggle" style="font-size: 13px; color: var(--text-muted); font-weight: 600; cursor: pointer; user-select: none;">Delete Data</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="delete_data_toggle" name="delete_data" value="yes">
+                            <span class="toggle-slider"></span>
                         </label>
                     </div>
-
+                                                                                               
                     <button type="submit" class="btn btn-primary" style="margin-left: auto;">+ Add Rule</button>
                 </div>
             </form>
@@ -401,7 +414,8 @@
                             <td>{% if rule.get('delete_data') %}<span class="status-badge-yes">YES</span>{% else %}<span class="status-badge-no">NO</span>{% endif %}</td>
                             <td style="text-align: right;">
                                 <form action="{{ url_for('delete_rule', index=loop.index0) }}" method="POST" style="margin:0;"
-                                      onsubmit="return confirm('Delete this rule? This cannot be undone.');">
+                                      data-confirm-word="DELETE" data-confirm-msg="Delete this rule? Type DELETE to confirm:">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;">Delete</button>
                                 </form>
                             </td>
@@ -416,7 +430,7 @@
 
         {% elif active_page == 'logs' %}
         <div class="card">
-            <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: monospace; font-size: 13px; color: var(--text-muted); line-height: 1.6;">{{ log_content }}</pre>
+            <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: monospace; font-size: 13px; color: var(--text-muted); line-height: 1.6;">{{ log_content | e }}</pre>
         </div>
 
         {% elif active_page == 'settings' %}
@@ -425,6 +439,7 @@
                 <h3 class="card-title">Application Settings</h3>
             </div>
             <form action="{{ url_for('save_settings') }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div class="settings-group">
                     <label class="settings-label" for="run_interval">Engine Run Interval (Minutes)</label>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">How often should Delegatarr run in the background to check the rules?</p>
@@ -447,13 +462,18 @@
                 </div>
 
                 <div class="settings-group">
-                    <label class="settings-label" style="display: flex; align-items: center; gap: 8px;">
-                        <input type="checkbox" name="dry_run" value="yes" {% if app_settings.get('dry_run') %}checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--accent);">
-                        Enable Dry Run
-                    </label>
-                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 5px; margin-bottom: 10px;">If enabled, Delegatarr will only log the torrents it WOULD remove, without actually deleting them from Deluge.</p>
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 5px;">
+                        <label for="dry_run_toggle" class="settings-label" style="margin-bottom: 0; cursor: pointer; user-select: none;">Enable Dry Run</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="dry_run_toggle" name="dry_run" value="yes" {% if app_settings.get('dry_run') %}checked{% endif %}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">
+                        If enabled, Delegatarr will only log the torrents it WOULD remove, without actually deleting them from Deluge.
+                    </p>
                 </div>
-
+                
                 <div style="border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 10px;">
                     <button type="submit" class="btn btn-primary">Save Changes</button>
                 </div>
@@ -470,6 +490,7 @@
                     <a href="{{ url_for('export_settings') }}" class="btn btn-primary">Export All Data</a>
 
                     <form action="{{ url_for('import_settings') }}" method="POST" enctype="multipart/form-data" style="margin: 0; display: flex; align-items: center; gap: 10px;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <input type="file" id="settingsUpload" name="settings_file" accept=".json" required style="display: none;">
                         <label for="settingsUpload" class="btn" style="margin: 0; cursor: pointer;">Browse Files...</label>
                         <span id="fileNameDisplay" style="font-size: 13px; color: var(--text-muted); max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">No file chosen</span>
@@ -482,12 +503,15 @@
                 <div>
                     <strong style="color: var(--danger); display: block; margin-bottom: 4px;">Danger Zone</strong>
                 </div>
+
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <form action="{{ url_for('factory_reset_settings') }}" method="POST" style="margin: 0; flex-grow: 1;" onsubmit="return confirm('WARNING: Are you sure? This will wipe your App Settings and restore them to default. Your Rules and Tags will NOT be touched.');">
+                    <form action="{{ url_for('factory_reset_settings') }}" method="POST" style="margin: 0; flex-grow: 1;" data-confirm-word="RESET" data-confirm-msg="WARNING: This will wipe your App Settings and restore them to default. Type RESET to continue:">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <button type="submit" class="btn btn-danger">Reset Settings</button>
                     </form>
-
-                    <form action="{{ url_for('factory_reset_all') }}" method="POST" style="margin: 0; flex-grow: 1;" onsubmit="return confirm('CRITICAL WARNING: Are you absolutely sure? This will completely WIPE ALL Settings, Rules, and Tracker Tags. This cannot be undone!');">
+                
+                    <form action="{{ url_for('factory_reset_all') }}" method="POST" style="margin: 0; flex-grow: 1;" data-confirm-word="DELETE" data-confirm-msg="CRITICAL WARNING: This will completely WIPE ALL Settings, Rules, and Tracker Tags. Type DELETE to confirm:">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <button type="submit" class="btn btn-danger-dark" title="Delete everything and start fresh">
                             <svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
                                 <circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/>
@@ -515,7 +539,9 @@
                 this.initServiceWorker();
                 this.initFlashMessages();
                 this.initTimezoneSelect();
-                this.initTableFeatures();
+                this.initSearch();
+                this.initFilters();
+                this.initSorting();
             },
 
             cacheDOM() {
@@ -554,6 +580,21 @@
                         this.fileNameDisplay.textContent = e.target.files.length > 0 ? e.target.files[0].name : 'No file chosen';
                     });
                 }
+
+                // Handle encapsulated destructive action prompts
+                document.querySelectorAll('form[data-confirm-word]').forEach(form => {
+                    form.addEventListener('submit', (e) => {
+                        const expectedWord = form.dataset.confirmWord;
+                        const message = form.dataset.confirmMsg || `Type ${expectedWord} to confirm:`;
+                        
+                        const userInput = prompt(message);
+                        
+                        // Strict check: prevents null (Cancel) and "" (Empty OK)
+                        if (userInput !== expectedWord) {
+                            e.preventDefault();
+                        }
+                    });
+                });
             },
 
             toggleSidebar() {
@@ -567,7 +608,8 @@
 
             initServiceWorker() {
                 if ('serviceWorker' in navigator) {
-                    navigator.serviceWorker.register("{{ url_for('service_worker') }}").catch(() => {});
+                    navigator.serviceWorker.register("{{ url_for('service_worker') }}")
+                        .catch(err => console.warn('Service Worker registration failed:', err));
                 }
             },
 
@@ -603,41 +645,46 @@
                 });
             },
 
-            initTableFeatures() {
-                // 1. Setup search listeners (don't run initial search for trackers yet)
+            // --- TABLE FEATURES REFACTORED ---
+
+            initSearch() {
                 if (this.trackerSearch && this.trackerTable) {
                     this.setupTableSearch(this.trackerSearch, this.trackerTable, this.trackerCount, false);
                 }
-
                 if (this.rulesSearch && this.rulesTable) {
                     this.setupTableSearch(this.rulesSearch, this.rulesTable, this.rulesCount, true);
                 }
+            },
 
-                // 2. Initialize Tracker Filtering (this triggers the initial search for the tracker table)
+            initFilters() {
                 if (this.trackerFilter) {
-                    const savedFilter = localStorage.getItem('trackerFilterPref');
+                    // Using sessionStorage so stale filters don't persist across sessions
+                    const savedFilter = sessionStorage.getItem('trackerFilterPref');
                     if (savedFilter) this.trackerFilter.value = savedFilter;
                     this.filterTrackers(); 
                 }
+            },
 
-                // 3. Initialize Sorting
+            initSorting() {
                 document.querySelectorAll('th.sortable').forEach(th => {
                     th.dataset.sortOrder = 'desc'; 
                     th.addEventListener('click', (e) => this.handleSortClick(e.currentTarget));
                 });
 
-                // Restore Sort States safely
+                // Restore Sort States safely using Column Header Text instead of Index
                 [this.trackerTable, this.rulesTable].forEach(table => {
                     if (table && table.id) {
-                        const savedCol = localStorage.getItem(table.id + '_sortCol');
+                        const savedColText = localStorage.getItem(table.id + '_sortColText');
                         const savedAsc = localStorage.getItem(table.id + '_sortAsc');
                         
-                        if (savedCol !== null && savedAsc !== null) {
-                            const colIdx = parseInt(savedCol, 10);
+                        if (savedColText !== null && savedAsc !== null) {
                             const isAsc = savedAsc === 'true';
-                            const targetTh = table.querySelector(`th:nth-child(${colIdx + 1})`);
+                            // Find the header that matches the saved text
+                            const headers = Array.from(table.querySelectorAll('th.sortable'));
+                            const targetTh = headers.find(th => th.textContent.trim() === savedColText);
                             
-                            if (targetTh && targetTh.classList.contains('sortable')) {
+                            if (targetTh) {
+                                const colIdx = Array.from(targetTh.parentNode.children).indexOf(targetTh);
                                 targetTh.dataset.sortOrder = isAsc ? 'asc' : 'desc';
                                 this.performSort(table, colIdx, isAsc);
                             }
@@ -646,21 +693,20 @@
                 });
             },
 
-            // UTILITIES 
+            // --- UTILITIES --- 
 
             debounce(func, wait) {
                 let timeout;
-                // Use arrow function to guarantee lexical 'this' binding
                 return (...args) => {
                     clearTimeout(timeout);
-                    timeout = setTimeout(() => func.apply(this, args), wait);
+                    timeout = setTimeout(() => func(...args), wait);
                 };
             },
 
             filterTrackers() {
                 if (!this.trackerFilter || !this.trackerTable) return;
                 const filter = this.trackerFilter.value;
-                localStorage.setItem('trackerFilterPref', filter);
+                sessionStorage.setItem('trackerFilterPref', filter);
                 
                 const rows = this.trackerTable.querySelectorAll('.tracker-row');
                 rows.forEach(row => {
@@ -702,16 +748,14 @@
                 rows.forEach(row => {
                     if (row.querySelector('th')) return; 
                     
-                    // Explicitly check for our encoded intent to skip placeholder rows
                     if (row.dataset.placeholder === 'true') return;
                     
                     const isHiddenByDropdown = row.dataset.filteredOut === 'true';
                     if (!isHiddenByDropdown) filteredTotalCount++;
                     
-                    // Safely extract text without double-counting inputs
                     const textCells = Array.from(row.cells).filter(cell => !cell.querySelector('input'));
                     let text = textCells.map(c => c.textContent).join(' ').toLowerCase();
-                    row.querySelectorAll('input').forEach(input => text += ' ' + input.value.toLowerCase());
+                    row.querySelectorAll('input:not([type="hidden"])').forEach(input => text += ' ' + input.value.toLowerCase());
 
                     if (text.includes(filter) && !isHiddenByDropdown) {
                         row.style.display = '';
@@ -740,17 +784,22 @@
             },
 
             comparer(idx, asc) {
-                // Explicitly reference DelegatarrUI to make context loss impossible
-                return (a, b) => ((v1, v2) => 
-                    v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2) ? 
-                    v1 - v2 : 
-                    v1.toString().localeCompare(v2, undefined, {numeric: true, sensitivity: 'base'})
-                )(DelegatarrUI.getCellValue(asc ? a : b, idx), DelegatarrUI.getCellValue(asc ? b : a, idx));
+                // Lexical 'this' preserves context inside the arrow function
+                return (a, b) => {
+                    const v1 = this.getCellValue(asc ? a : b, idx);
+                    const v2 = this.getCellValue(asc ? b : a, idx);
+                    
+                    if (v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2)) {
+                        return v1 - v2;
+                    }
+                    return v1.toString().localeCompare(v2, undefined, {numeric: true, sensitivity: 'base'});
+                };
             },
 
             handleSortClick(th) {
                 const table = th.closest('table');
                 const columnIndex = Array.from(th.parentNode.children).indexOf(th);
+                const headerText = th.textContent.trim();
                 
                 const isAsc = th.dataset.sortOrder !== 'asc';
                 th.dataset.sortOrder = isAsc ? 'asc' : 'desc';
@@ -758,7 +807,7 @@
                 this.performSort(table, columnIndex, isAsc);
 
                 if (table.id) {
-                    localStorage.setItem(table.id + '_sortCol', columnIndex);
+                    localStorage.setItem(table.id + '_sortColText', headerText);
                     localStorage.setItem(table.id + '_sortAsc', isAsc);
                 }
             },
@@ -767,7 +816,6 @@
                 const tbody = table.querySelector('tbody') || table;
                 const rows = Array.from(tbody.querySelectorAll('tr')).filter(tr => !tr.querySelector('th'));
 
-                // Pass the safe comparer
                 rows.sort(this.comparer(columnIndex, asc)).forEach(tr => tbody.appendChild(tr));
 
                 table.querySelectorAll('th.sortable').forEach(th => {
