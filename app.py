@@ -2,6 +2,7 @@ import io
 import json
 import logging
 import os
+import secrets
 import ssl
 import threading
 import time
@@ -11,16 +12,21 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import contextmanager
 from deluge_client import DelugeRPCClient
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory, send_file, flash
+from flask_wtf.csrf import CSRFProtect
 from logging.handlers import RotatingFileHandler
 from waitress import serve
 
 # --- VERSION CONTROL ---
-APP_VERSION = "2026.04.05"
+APP_VERSION = "2026.04.06"
 
 # --- INITIALIZE ENVIRONMENT ---
 os.makedirs('/config', exist_ok=True)
 
 app = Flask(__name__)
+
+# --- GENERATE SECRET KEY ---
+app.config['SECRET_KEY'] = secrets.token_hex(32) 
+csrf = CSRFProtect(app)
 
 # --- SETUP LOGGING ---
 LOG_FILE = '/config/delegatarr.log'
