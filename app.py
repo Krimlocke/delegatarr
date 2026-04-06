@@ -17,7 +17,7 @@ from logging.handlers import RotatingFileHandler
 from waitress import serve
 
 # --- VERSION CONTROL ---
-APP_VERSION = "2026.04.06"
+APP_VERSION = "2026.04.07"
 
 # --- INITIALIZE ENVIRONMENT ---
 os.makedirs('/config', exist_ok=True)
