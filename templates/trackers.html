@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <form action="{{ url_for('main.update_groups') }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="card-header">
+            <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                <h3 class="card-title">Assign Tags to Trackers</h3>
+                <span id="trackerCount" style="font-size: 13px; color: var(--text-muted); font-weight: 500;"></span>
+            </div>
+            <select id="trackerFilter" aria-label="Filter trackers" style="width: 220px; padding: 6px 10px;">
+                <option value="all">Show All Current Trackers</option>
+                <option value="untagged">Show Not Tagged</option>
+                <option value="tagged">Show Current Tagged</option>
+            </select>
+        </div>
+        
+        <input type="text" id="trackerSearch" class="table-search" aria-label="Search trackers" placeholder="🔍 Search trackers or tags...">
+        
+        <div class="table-wrapper">
+            <table id="trackerTable">
+                <thead>
+                    <tr>
+                        <th class="sortable">Tracker Domain</th>
+                        <th class="sortable">Active Torrents</th>
+                        <th>Tag Assignment</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tracker, count in tracker_summary.items() %}
+                    <tr class="tracker-row">
+                        <td style="font-weight: 500;">{{ tracker }}</td>
+                        <td>{{ count }}</td>
+                        <td>
+                            <input type="text" class="tag-input" aria-label="Tag assignment for {{ tracker }}" name="{{ tracker }}" value="{{ groups.get(tracker, '') }}" placeholder="Tag (or 'REMOVE')" style="width: 200px;">
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr data-placeholder="true">
+                        <td colspan="3" style="text-align: center; color: var(--text-muted); padding: 30px;">No active torrents found in Deluge.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+            <button type="submit" class="btn btn-primary">Save Tags</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
