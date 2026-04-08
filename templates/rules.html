@@ -5,24 +5,23 @@
         <h3 class="card-title">Create New Rule</h3>
     </div>
 	
-	<form action="/add_rule" method="POST" id="ruleWizardForm" style="margin-bottom: 30px; padding-bottom: 25px; border-bottom: 1px solid var(--border-color);">
+	<form action="/add_rule" method="POST" id="ruleForm" style="margin-bottom: 30px; padding-bottom: 25px; border-bottom: 1px solid var(--border-color);">
 		{{.CSRFField}}
 
-		<div class="wizard-progress">
-			<div class="wizard-progress-bar" id="wizardBar" style="width: 33%;"></div>
-		</div>
-
-		<div class="wizard-step active" id="step-1">
-			<h4 style="margin-top: 0; margin-bottom: 15px; color: var(--accent);">Step 1: What are we targeting?</h4>
+		<div class="rule-section">
+			<div class="rule-section-header">
+				<span class="rule-section-num">1</span>
+				<span class="rule-section-title">Target</span>
+			</div>
 			<div class="form-row" style="align-items: flex-end;">
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Target Tag</label>
-					<input type="text" list="tagList" name="group_id" placeholder="e.g., ipt" required autocomplete="off">
+					<input type="text" list="tagList" name="group_id" class="input-required" placeholder="e.g., ipt" required autocomplete="off">
 					<datalist id="tagList">{{range .UniqueTags}}<option value="{{.}}">{{end}}</datalist>
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Deluge Label</label>
-					<input type="text" list="labelList" name="label" placeholder="e.g., seed" required autocomplete="off">
+					<input type="text" list="labelList" name="label" class="input-required" placeholder="e.g., seed" required autocomplete="off">
 					<datalist id="labelList">{{range .UniqueLabels}}<option value="{{.}}">{{end}}</datalist>
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
@@ -34,13 +33,13 @@
 					</select>
 				</div>
 			</div>
-			<div style="margin-top: 20px; text-align: right;">
-				<button type="button" class="btn btn-primary btn-next" data-next="2">Next Step &rarr;</button>
-			</div>
 		</div>
 
-		<div class="wizard-step" id="step-2">
-			<h4 style="margin-top: 0; margin-bottom: 15px; color: var(--accent);">Step 2: When should it be removed?</h4>
+		<div class="rule-section">
+			<div class="rule-section-header">
+				<span class="rule-section-num">2</span>
+				<span class="rule-section-title">Removal Conditions</span>
+			</div>
 			<div class="form-row" style="align-items: flex-end;">
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Time Metric</label>
@@ -53,7 +52,7 @@
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1.5;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Time Threshold</label>
 					<div style="display: flex; gap: 6px;">
-						<input type="number" name="threshold_value" placeholder="Time" step="any" required style="width: 50%;">
+						<input type="number" name="threshold_value" class="input-required" placeholder="Time" step="any" required style="width: 50%;">
 						<select name="threshold_unit" style="width: 50%;">
 							<option value="minutes">Minutes</option>
 							<option value="hours" selected>Hours</option>
@@ -67,21 +66,20 @@
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Ratio Target</label>
-					<input type="number" name="seed_ratio" placeholder="Ratio >" step="0.01" min="0">
+					<input type="number" name="seed_ratio" placeholder="Optional" step="0.01" min="0">
 				</div>
-			</div>
-			<div style="margin-top: 20px; display: flex; justify-content: space-between;">
-				<button type="button" class="btn btn-prev" data-prev="1">&larr; Back</button>
-				<button type="button" class="btn btn-primary btn-next" data-next="3">Next Step &rarr;</button>
 			</div>
 		</div>
 
-		<div class="wizard-step" id="step-3">
-			<h4 style="margin-top: 0; margin-bottom: 15px; color: var(--accent);">Step 3: Protections & Priorities</h4>
+		<div class="rule-section">
+			<div class="rule-section-header">
+				<span class="rule-section-num">3</span>
+				<span class="rule-section-title">Protections & Priority</span>
+			</div>
 			<div class="form-row" style="align-items: flex-end;">
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Min Keep</label>
-					<input type="number" name="min_torrents" placeholder="Min Keep" value="0" required>
+					<input type="number" name="min_torrents" class="input-required" placeholder="Min Keep" value="0" required>
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1.5;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Removal Priority</label>
@@ -100,10 +98,10 @@
 					</label>
 				</div>
 			</div>
-			<div style="margin-top: 20px; display: flex; justify-content: space-between;">
-				<button type="button" class="btn btn-prev" data-prev="2">&larr; Back</button>
-				<button type="submit" class="btn btn-success" style="background-color: var(--success); color: white;">+ Save Rule</button>
-			</div>
+		</div>
+
+		<div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+			<button type="submit" class="btn btn-success" style="background-color: var(--success); color: white;">+ Save Rule</button>
 		</div>
 	</form>	
 	
