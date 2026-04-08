@@ -4,7 +4,7 @@ import time
 import logging
 
 # --- VERSION CONTROL ---
-APP_VERSION = "2026.04.08-beta.py"
+APP_VERSION = "2026.04.08.py"
 
 # --- SYSTEM DIRECTORIES ---
 CONFIG_DIR = '/config'
