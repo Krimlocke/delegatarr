@@ -1,23 +1,97 @@
 {{template "base.html" .}}
 {{define "content"}}
 <div class="card">
-    <pre id="logOutput" style="white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: monospace; font-size: 13px; color: var(--text-muted); line-height: 1.6;">{{.LogContent}}</pre>
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px; flex-wrap: wrap;">
+        <input type="text" id="logSearch" class="table-search" aria-label="Search logs" placeholder="🔍 Search logs..." style="flex: 1; margin-bottom: 0;">
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button type="button" class="log-filter-btn active" data-filter="all">All</button>
+            <button type="button" class="log-filter-btn" data-filter="rule">Rules</button>
+            <button type="button" class="log-filter-btn" data-filter="error">Errors</button>
+            <button type="button" class="log-filter-btn" data-filter="system">System</button>
+        </div>
+    </div>
+    <div id="logOutput" style="font-family: monospace; font-size: 13px; line-height: 1.6;"></div>
 </div>
 
+<script type="application/json" id="logData">{{jsonStr .LogContent}}</script>
+
 <script>
-    setInterval(() => {
+    const logBox = document.getElementById('logOutput');
+    const logSearch = document.getElementById('logSearch');
+    let currentFilter = 'all';
+    let rawLogText = '';
+
+    function classifyLine(line) {
+        const lower = line.toLowerCase();
+        if (lower.includes('error') || lower.includes('failed')) return 'log-error';
+        if (lower.includes('rule matched') || lower.includes('removed:')) return 'log-rule';
+        if (lower.includes('[dry run]')) return 'log-dryrun';
+        if (lower.includes('skipped')) return 'log-warn';
+        if (lower.includes('system:')) return 'log-system';
+        if (lower.includes('completed. successfully')) return 'log-success';
+        return 'log-default';
+    }
+
+    function filterCategory(cls) {
+        if (currentFilter === 'all') return true;
+        if (currentFilter === 'rule') return cls === 'log-rule' || cls === 'log-dryrun' || cls === 'log-success';
+        if (currentFilter === 'error') return cls === 'log-error' || cls === 'log-warn';
+        if (currentFilter === 'system') return cls === 'log-system';
+        return true;
+    }
+
+    function renderLogs() {
+        const searchTerm = logSearch.value.toLowerCase();
+        const lines = rawLogText.split('\n');
+        let html = '';
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            const cls = classifyLine(line);
+            if (!filterCategory(cls)) continue;
+            if (searchTerm && !line.toLowerCase().includes(searchTerm)) continue;
+
+            const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            html += '<div class="log-line ' + cls + '">' + escaped + '</div>';
+        }
+
+        logBox.innerHTML = html || '<div class="log-line log-default">No matching log entries.</div>';
+    }
+
+    function fetchLogs() {
         fetch('/api/logs', { headers: { 'X-API-Token': '{{.APIToken}}' } })
-            .then(response => {
-                if (!response.ok) throw new Error('HTTP ' + response.status);
-                return response.text();
-            })
+            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
             .then(data => {
-                const logBox = document.getElementById('logOutput');
-                if (logBox && data !== logBox.textContent) {
-                    logBox.textContent = data;
+                if (data !== rawLogText) {
+                    rawLogText = data;
+                    renderLogs();
                 }
             })
             .catch(err => console.error("Log fetch error:", err));
-    }, 5000);
+    }
+
+    // Initial render from server-side content
+    rawLogText = JSON.parse(document.getElementById('logData').textContent);
+    renderLogs();
+
+    // Auto-refresh
+    setInterval(fetchLogs, 5000);
+
+    // Search
+    let searchTimeout;
+    logSearch.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(renderLogs, 250);
+    });
+
+    // Filter buttons
+    document.querySelectorAll('.log-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentFilter = btn.dataset.filter;
+            renderLogs();
+        });
+    });
 </script>
 {{end}}
