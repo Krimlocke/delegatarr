@@ -2,7 +2,8 @@
 {{define "content"}}
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title">Create New Rule</h3>
+        <h3 class="card-title" id="formTitle">Create New Rule</h3>
+        <button type="button" id="cancelEdit" class="btn" style="display: none; font-size: 12px; padding: 6px 12px;" onclick="cancelEditMode()">Cancel Edit</button>
     </div>
 	
 	<form action="/add_rule" method="POST" id="ruleForm" style="margin-bottom: 30px; padding-bottom: 25px; border-bottom: 1px solid var(--border-color);">
@@ -101,7 +102,7 @@
 		</div>
 
 		<div style="display: flex; justify-content: flex-end; margin-top: 8px;">
-			<button type="submit" class="btn btn-success" style="background-color: var(--success); color: white;">+ Save Rule</button>
+			<button type="submit" id="formSubmitBtn" class="btn btn-success" style="background-color: var(--success); color: white;">+ Save Rule</button>
 		</div>
 	</form>	
 	
@@ -117,11 +118,6 @@
         <div class="rule-card" data-search="{{$rule.GroupID}} {{$rule.Label}} {{$rule.TargetState}} {{$rule.TimeMetric}} {{$rule.SortOrder}}">
             <div class="rule-card-header">
                 <div class="rule-card-tag">{{$rule.GroupID}}</div>
-                <form action="/delete_rule/{{$i}}" method="POST" style="margin:0;"
-                      data-confirm-word="DELETE" data-confirm-msg="Delete this rule? Type DELETE to confirm:">
-                    {{$.CSRFField}}
-                    <button type="submit" class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;">Delete</button>
-                </form>
             </div>
             <div class="rule-card-body">
                 <div class="rule-card-row">
@@ -154,7 +150,18 @@
                 </div>
             </div>
             <div class="rule-card-footer">
-                {{if $rule.DeleteData}}<span class="status-badge-yes">Delete Data: YES</span>{{else}}<span class="status-badge-no">Delete Data: NO</span>{{end}}
+                <div class="rule-card-status">
+                    {{if $rule.DeleteData}}<span class="status-dot status-dot-danger"></span> Delete data: <strong style="color: var(--danger);">yes</strong>
+                    {{else}}<span class="status-dot status-dot-success"></span> Delete data: <strong style="color: var(--success);">no</strong>{{end}}
+                </div>
+                <div class="rule-card-actions">
+                    <button type="button" class="btn-ghost btn-ghost-edit" onclick="editRule({{$i}})">Edit</button>
+                    <form action="/delete_rule/{{$i}}" method="POST" style="margin:0; display:inline;"
+                          data-confirm-word="DELETE" data-confirm-msg="Delete this rule? Type DELETE to confirm:">
+                        {{$.CSRFField}}
+                        <button type="submit" class="btn-ghost btn-ghost-delete">Delete</button>
+                    </form>
+                </div>
             </div>
         </div>
         {{end}}
@@ -163,4 +170,46 @@
         {{end}}
     </div>
 </div>
+
+<script>
+function editRule(index) {
+    fetch('/api/rule/' + index, { headers: { 'X-API-Token': '{{.APIToken}}' } })
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(rule => {
+            const form = document.getElementById('ruleForm');
+            form.action = '/edit_rule/' + index;
+
+            form.querySelector('[name="group_id"]').value = rule.group_id || '';
+            form.querySelector('[name="label"]').value = rule.label || '';
+            form.querySelector('[name="target_state"]').value = rule.target_state || 'All';
+            form.querySelector('[name="time_metric"]').value = rule.time_metric || 'seeding_time';
+            form.querySelector('[name="threshold_value"]').value = rule.threshold_value || '';
+            form.querySelector('[name="threshold_unit"]').value = rule.threshold_unit || 'hours';
+            form.querySelector('[name="logic_operator"]').value = rule.logic_operator || 'OR';
+            form.querySelector('[name="seed_ratio"]').value = rule.seed_ratio != null ? rule.seed_ratio : '';
+            form.querySelector('[name="min_torrents"]').value = rule.min_torrents != null ? rule.min_torrents : 0;
+            form.querySelector('[name="sort_order"]').value = rule.sort_order || 'oldest_added';
+
+            const deleteToggle = document.getElementById('delete_data_toggle');
+            deleteToggle.checked = !!rule.delete_data;
+
+            document.getElementById('formTitle').textContent = 'Edit Rule';
+            document.getElementById('formSubmitBtn').textContent = 'Update Rule';
+            document.getElementById('cancelEdit').style.display = '';
+
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        })
+        .catch(err => console.error('Failed to load rule:', err));
+}
+
+function cancelEditMode() {
+    const form = document.getElementById('ruleForm');
+    form.action = '/add_rule';
+    form.reset();
+
+    document.getElementById('formTitle').textContent = 'Create New Rule';
+    document.getElementById('formSubmitBtn').textContent = '+ Save Rule';
+    document.getElementById('cancelEdit').style.display = 'none';
+}
+</script>
 {{end}}
