@@ -111,59 +111,56 @@
     </div>
     <input type="text" id="rulesSearch" class="table-search" aria-label="Search rules" placeholder="🔍 Search rules by tag, label, or state...">
     
-    <div class="table-wrapper">
-        <table id="rulesTable">
-            <thead>
-                <tr>
-                    <th class="sortable">Tag</th><th class="sortable">Label</th><th class="sortable">State</th><th class="sortable">Metric</th><th class="sortable">Threshold</th><th class="sortable">Min Keep</th><th>Sorting Priority</th><th>Delete Data?</th><th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {{if .RulesList}}
-                {{range $i, $rule := .RulesList}}
-                <tr>
-                    <td><strong style="color: var(--accent);">{{$rule.GroupID}}</strong></td>
-                    <td>{{$rule.Label}}</td>
-                    <td><span style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">{{$rule.TargetState}}</span></td>
-                    <td>
-                        {{if eq $rule.TimeMetric "time_added"}}Time Since Added
-                        {{else if eq $rule.TimeMetric "time_paused"}}Time Paused
-                        {{else}}Seeding Time{{end}}
-                    </td>
-                    <td>
-                        > {{$rule.ThresholdValue}} {{$rule.ThresholdUnit}}
-                        {{if $rule.SeedRatio}}
-                            <br>
-                            <span style="font-size: 12px; color: var(--accent); font-weight: 600;">
-                                {{$rule.LogicOperator}}
-                            </span> 
-                            <span style="font-size: 13px; color: var(--text-muted);">
-                                Ratio > {{deref $rule.SeedRatio}}
-                            </span>
-                        {{end}}
-                    </td>
-                    <td>{{$rule.MinTorrents}}</td>
-                    <td style="color: var(--text-muted);">
-                        {{if eq $rule.SortOrder "newest_added"}}Newest Added
-                        {{else if eq $rule.SortOrder "longest_seeding"}}Longest Seeding
-                        {{else if eq $rule.SortOrder "shortest_seeding"}}Shortest Seeding
-                        {{else}}Oldest Added{{end}}
-                    </td>
-                    <td>{{if $rule.DeleteData}}<span class="status-badge-yes">YES</span>{{else}}<span class="status-badge-no">NO</span>{{end}}</td>
-                    <td style="text-align: right;">
-                        <form action="/delete_rule/{{$i}}" method="POST" style="margin:0;"
-                              data-confirm-word="DELETE" data-confirm-msg="Delete this rule? Type DELETE to confirm:">
-                            {{$.CSRFField}}
-                            <button type="submit" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;">Delete</button>
-                        </form>
-                    </td>
-                </tr>
-                {{end}}
-                {{else}}
-                <tr data-placeholder="true"><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">No automation rules configured yet.</td></tr>
-                {{end}}
-            </tbody>
-        </table>
+    <div id="rulesGrid" class="rules-grid">
+        {{if .RulesList}}
+        {{range $i, $rule := .RulesList}}
+        <div class="rule-card" data-search="{{$rule.GroupID}} {{$rule.Label}} {{$rule.TargetState}} {{$rule.TimeMetric}} {{$rule.SortOrder}}">
+            <div class="rule-card-header">
+                <div class="rule-card-tag">{{$rule.GroupID}}</div>
+                <form action="/delete_rule/{{$i}}" method="POST" style="margin:0;"
+                      data-confirm-word="DELETE" data-confirm-msg="Delete this rule? Type DELETE to confirm:">
+                    {{$.CSRFField}}
+                    <button type="submit" class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;">Delete</button>
+                </form>
+            </div>
+            <div class="rule-card-body">
+                <div class="rule-card-row">
+                    <div class="rule-card-detail">
+                        <span class="rule-card-label">Label</span>
+                        <span class="rule-card-value">{{$rule.Label}}</span>
+                    </div>
+                    <div class="rule-card-detail">
+                        <span class="rule-card-label">State</span>
+                        <span class="rule-card-value">{{$rule.TargetState}}</span>
+                    </div>
+                    <div class="rule-card-detail">
+                        <span class="rule-card-label">Metric</span>
+                        <span class="rule-card-value">{{if eq $rule.TimeMetric "time_added"}}Time Since Added{{else if eq $rule.TimeMetric "time_paused"}}Time Paused{{else}}Seeding Time{{end}}</span>
+                    </div>
+                </div>
+                <div class="rule-card-row">
+                    <div class="rule-card-detail">
+                        <span class="rule-card-label">Threshold</span>
+                        <span class="rule-card-value">> {{$rule.ThresholdValue}} {{$rule.ThresholdUnit}}{{if $rule.SeedRatio}} <span style="color: var(--accent); font-weight: 600; font-size: 12px;">{{$rule.LogicOperator}}</span> Ratio > {{deref $rule.SeedRatio}}{{end}}</span>
+                    </div>
+                    <div class="rule-card-detail">
+                        <span class="rule-card-label">Min Keep</span>
+                        <span class="rule-card-value">{{$rule.MinTorrents}}</span>
+                    </div>
+                    <div class="rule-card-detail">
+                        <span class="rule-card-label">Priority</span>
+                        <span class="rule-card-value">{{if eq $rule.SortOrder "newest_added"}}Newest Added{{else if eq $rule.SortOrder "longest_seeding"}}Longest Seeding{{else if eq $rule.SortOrder "shortest_seeding"}}Shortest Seeding{{else}}Oldest Added{{end}}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="rule-card-footer">
+                {{if $rule.DeleteData}}<span class="status-badge-yes">Delete Data: YES</span>{{else}}<span class="status-badge-no">Delete Data: NO</span>{{end}}
+            </div>
+        </div>
+        {{end}}
+        {{else}}
+        <div class="rule-card-empty">No automation rules configured yet.</div>
+        {{end}}
     </div>
 </div>
 {{end}}
