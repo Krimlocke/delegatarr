@@ -6,6 +6,7 @@ RUN apk add --no-cache gcc musl-dev
 WORKDIR /src
 COPY . .
 RUN go mod tidy
+RUN CGO_ENABLED=0 go build -v -ldflags="-s -w" -o /delegatarr ./cmd/delegatarr 2>&1 || true
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /delegatarr ./cmd/delegatarr
 
 # --- Runtime Stage ---
