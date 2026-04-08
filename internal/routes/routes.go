@@ -40,19 +40,37 @@ var (
 // SetAPIToken sets the API token used for internal JS requests.
 func SetAPIToken(token string) { apiToken = token }
 
-// LoadTemplates parses the HTML templates from the given directory.
-// Each page template includes base.html via {{template "base.html" .}}.
-func LoadTemplates(dir string) error {
-	funcMap := template.FuncMap{
+var (
+	funcMap = template.FuncMap{
 		"csrfField": func() template.HTML { return "" },
 		"eq":        func(a, b interface{}) bool { return fmt.Sprint(a) == fmt.Sprint(b) },
 		"add":       func(a, b int) int { return a + b },
 		"lower":     strings.ToLower,
 		"deref":     func(f *float64) float64 { if f == nil { return 0 }; return *f },
 	}
-	var err error
-	templates, err = template.New("").Funcs(funcMap).ParseGlob(filepath.Join(dir, "*.html"))
-	return err
+	pageTemplates map[string]*template.Template
+	templateDir   string
+)
+
+// LoadTemplates parses each page template individually together with base.html.
+// This avoids the Go template issue where multiple files defining the same
+// block name ("content") overwrite each other in a single ParseGlob call.
+func LoadTemplates(dir string) error {
+	templateDir = dir
+	pageTemplates = make(map[string]*template.Template)
+
+	basePath := filepath.Join(dir, "base.html")
+
+	pages := []string{"trackers.html", "rules.html", "logs.html", "settings.html"}
+	for _, page := range pages {
+		pagePath := filepath.Join(dir, page)
+		t, err := template.New("").Funcs(funcMap).ParseFiles(pagePath, basePath)
+		if err != nil {
+			return fmt.Errorf("parsing %s: %w", page, err)
+		}
+		pageTemplates[page] = t
+	}
+	return nil
 }
 
 // RegisterRoutes sets up all HTTP routes on the given router.
@@ -141,8 +159,14 @@ func renderPage(w http.ResponseWriter, r *http.Request, tmplName string, data *p
 	data.CSRFField = csrf.TemplateField(r)
 	data.Flash = getFlash(w, r)
 
-	// Clone the template set so we can override funcs per-request
-	if err := templates.ExecuteTemplate(w, tmplName, data); err != nil {
+	t, ok := pageTemplates[tmplName]
+	if !ok {
+		log.Printf("Template not found: %s", tmplName)
+		http.Error(w, "Internal Server Error", 500)
+		return
+	}
+	// Execute the page template by its filename — ParseFiles uses the filename as the template name
+	if err := t.ExecuteTemplate(w, tmplName, data); err != nil {
 		log.Printf("Template render error: %v", err)
 		http.Error(w, "Internal Server Error", 500)
 	}
