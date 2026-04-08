@@ -5,10 +5,8 @@ RUN apk add --no-cache gcc musl-dev
 
 WORKDIR /src
 COPY . .
-RUN go mod tidy && \
-    echo "=== BUILD START ===" && \
-    CGO_ENABLED=0 go build -v -gcflags=-e -ldflags="-s -w" -o /delegatarr ./cmd/delegatarr 2>&1; \
-    echo "=== EXIT CODE: $? ==="
+RUN go mod tidy
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /delegatarr ./cmd/delegatarr
 
 # --- Runtime Stage ---
 FROM alpine:3.19

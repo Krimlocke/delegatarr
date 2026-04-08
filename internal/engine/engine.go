@@ -40,7 +40,9 @@ func GetDashboardData() (TrackerSummary, []string) {
 	summary := TrackerSummary{}
 	labelsSet := map[string]bool{}
 
-	for _, t := range torrents {
+	for _, ts := range torrents {
+		t := deluge.FromStatus(ts)
+
 		if t.Label != "" {
 			labelsSet[t.Label] = true
 		}
@@ -73,7 +75,7 @@ type torrentCandidate struct {
 	ID           string
 	Name         string
 	SeedingHours float64
-	TimeAdded    int64
+	TimeAdded    float64
 	TriggerValue float64
 	Ratio        float64
 }
@@ -149,7 +151,9 @@ func ProcessTorrents(runType string) {
 		sortOrder := rule.SortOrder
 		var matching []torrentCandidate
 
-		for hash, t := range torrents {
+		for hash, ts := range torrents {
+			t := deluge.FromStatus(ts)
+
 			name := t.Name
 			label := t.Label
 			state := t.State
@@ -163,7 +167,7 @@ func ProcessTorrents(runType string) {
 			activeHours := float64(t.ActiveTime) / 3600.0
 			ratio := t.Ratio
 
-			totalAgeHours := (currentTime - float64(timeAdded)) / 3600.0
+			totalAgeHours := (currentTime - timeAdded) / 3600.0
 			pausedHours := totalAgeHours - activeHours
 			if pausedHours < 0 {
 				pausedHours = 0
@@ -272,7 +276,7 @@ func ProcessTorrents(runType string) {
 				entry.Name, entry.Tag, entry.State, entry.Metric, entry.DeleteData)
 			removedCount++
 		} else {
-			if err := c.RemoveTorrent(entry.ID, entry.DeleteData); err != nil {
+			if _, err := c.RemoveTorrent(entry.ID, entry.DeleteData); err != nil {
 				log.Printf("Failed to remove '%s': %v", entry.Name, err)
 			} else {
 				log.Printf("Rule Matched! Removed: '%s' (Tag: %s, State: %s, Metric: %s, Delete Data: %v)",
