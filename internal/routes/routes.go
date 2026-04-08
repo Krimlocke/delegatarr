@@ -47,6 +47,10 @@ var (
 		"add":       func(a, b int) int { return a + b },
 		"lower":     strings.ToLower,
 		"deref":     func(f *float64) float64 { if f == nil { return 0 }; return *f },
+		"jsonStr": func(s string) template.JS {
+			b, _ := json.Marshal(s)
+			return template.JS(b)
+		},
 	}
 	pageTemplates map[string]*template.Template
 	templateDir   string
