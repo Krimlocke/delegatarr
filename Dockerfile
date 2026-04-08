@@ -11,15 +11,18 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the python script and the HTML templates folder
+# Copy the application package and folders
 COPY app.py .
+COPY logo.png . 
+COPY delegatarr/ delegatarr/
+COPY static/ static/
 COPY templates/ templates/
 
 # Explicitly declare the /config volume for persistent storage
 VOLUME /config
 
-# Expose the new port that Waitress is serving on
-EXPOSE 7777
+# Expose the port that Waitress is serving on
+EXPOSE 5555
 
 # Run the application with unbuffered output (-u) so logs appear instantly in Docker
 CMD ["python", "-u", "app.py"]

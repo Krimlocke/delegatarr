@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <pre id="logOutput" style="white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: monospace; font-size: 13px; color: var(--text-muted); line-height: 1.6;">{{ log_content | e }}</pre>
+</div>
+
+<script>
+    // Fetch new logs every 5 seconds (5000 milliseconds)
+    setInterval(() => {
+        fetch('/api/logs', { headers: { 'X-API-Token': '{{ api_token }}' } })
+            .then(response => {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.text();
+            })
+            .then(data => {
+                const logBox = document.getElementById('logOutput');
+                if (logBox && data !== logBox.textContent) {
+                    logBox.textContent = data;
+                }
+            })
+            .catch(err => console.error("Log fetch error:", err));
+    }, 5000);
+</script>
+{% endblock %}
