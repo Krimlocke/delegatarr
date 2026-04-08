@@ -1,0 +1,93 @@
+{{template "base.html" .}}
+{{define "content"}}
+<div class="card" style="max-width: 650px;">
+    <div class="card-header">
+        <h3 class="card-title">Application Settings</h3>
+    </div>
+    <form action="/save_settings" method="POST">
+        {{.CSRFField}}
+        <div class="settings-group">
+            <label class="settings-label" for="run_interval">Engine Run Interval (Minutes)</label>
+            <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">How often should Delegatarr run in the background to check the rules?</p>
+            <input type="number" id="run_interval" name="run_interval" value="{{.AppSettings.RunInterval}}" min="1" required style="width: 150px;">
+        </div>
+
+        <div class="settings-group">
+            <label class="settings-label" for="tzSelect">System Timezone</label>
+            <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Used to correctly timestamp logs and trigger scheduled tasks.</p>
+            <select id="tzSelect" name="timezone" style="width: 250px;" data-current-tz="{{.AppSettings.Timezone}}"></select>
+        </div>
+
+        <div class="settings-group">
+            <label class="settings-label" for="tracker_mode">Tracker Reading Mode</label>
+            <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Should Delegatarr read all trackers attached to a torrent, or just the primary tracker?</p>
+            <select id="tracker_mode" name="tracker_mode" style="width: 250px;">
+                <option value="all" {{if eq .AppSettings.TrackerMode "all"}}selected{{end}}>All Trackers</option>
+                <option value="top" {{if eq .AppSettings.TrackerMode "top"}}selected{{end}}>Primary Tracker</option>
+            </select>
+        </div>
+
+        <div class="settings-group">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 5px;">
+                <label for="dry_run_toggle" class="settings-label" style="margin-bottom: 0; cursor: pointer; user-select: none;">Enable Dry Run</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="dry_run_toggle" name="dry_run" value="yes" {{if .AppSettings.DryRun}}checked{{end}}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">
+                If enabled, Delegatarr will only log the torrents it WOULD remove, without actually removing / deleting from the torrent client.
+            </p>
+        </div>
+        
+        <div style="border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 10px;">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="max-width: 650px;">
+    <div class="card-header">
+        <h3 class="card-title">Data Management</h3>
+    </div>
+
+    <div class="data-management-row">
+        <div class="data-actions">
+            <a href="/export_settings" class="btn btn-primary">Export All Data</a>
+
+            <form action="/import_settings" method="POST" enctype="multipart/form-data" style="margin: 0; display: flex; align-items: center; gap: 10px;">
+                {{.CSRFField}}
+                <input type="file" id="settingsUpload" name="settings_file" accept=".json" required style="display: none;">
+                <label for="settingsUpload" class="btn" style="margin: 0; cursor: pointer;">Browse Files...</label>
+                <span id="fileNameDisplay" style="font-size: 13px; color: var(--text-muted); max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">No file chosen</span>
+                <button type="submit" class="btn btn-primary">Import</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="data-actions" style="margin-top: 25px; border-top: 1px solid var(--border-color); padding-top: 20px; justify-content: space-between;">
+        <div>
+            <strong style="color: var(--danger); display: block; margin-bottom: 4px;">Danger Zone</strong>
+        </div>
+
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <form action="/factory_reset_settings" method="POST" style="margin: 0; flex-grow: 1;" data-confirm-word="RESET" data-confirm-msg="WARNING: This will wipe your App Settings and restore them to default. Type RESET to continue:">
+                {{.CSRFField}}
+                <button type="submit" class="btn btn-danger">Reset Settings</button>
+            </form>
+        
+            <form action="/factory_reset_all" method="POST" style="margin: 0; flex-grow: 1;" data-confirm-word="DELETE" data-confirm-msg="CRITICAL WARNING: This will completely WIPE ALL Settings, Rules, and Tracker Tags. Type DELETE to confirm:">
+                {{.CSRFField}}
+                <button type="submit" class="btn btn-danger-dark" title="Delete everything and start fresh">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
+                        <circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/>
+                        <path d="M8 20v2h8v-2"/><path d="m12.5 17-.5-1-.5 1h1z"/>
+                        <path d="M16 20a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20"/>
+                    </svg>
+                    Nuclear Option
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{{end}}

@@ -1,0 +1,23 @@
+{{template "base.html" .}}
+{{define "content"}}
+<div class="card">
+    <pre id="logOutput" style="white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: monospace; font-size: 13px; color: var(--text-muted); line-height: 1.6;">{{.LogContent}}</pre>
+</div>
+
+<script>
+    setInterval(() => {
+        fetch('/api/logs', { headers: { 'X-API-Token': '{{.APIToken}}' } })
+            .then(response => {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.text();
+            })
+            .then(data => {
+                const logBox = document.getElementById('logOutput');
+                if (logBox && data !== logBox.textContent) {
+                    logBox.textContent = data;
+                }
+            })
+            .catch(err => console.error("Log fetch error:", err));
+    }, 5000);
+</script>
+{{end}}
