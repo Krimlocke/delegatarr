@@ -58,11 +58,17 @@ Python's `RotatingFileHandler` is replaced with Go's `log` package writing to a 
 APScheduler → `gocron`. The reschedule pattern works by removing the old job and adding a new one (exposed via `routes.RescheduleFunc`).
 
 ### 8. Docker Build
-The Dockerfile uses a multi-stage build:
-- **Builder stage**: `golang:1.22-alpine` runs `go mod tidy` and compiles a static binary
+The Dockerfile uses a multi-stage build with dependency layer caching:
+- **Builder stage**: `golang:1.22-alpine` copies `go.mod` first and runs `go mod download` to cache dependencies in their own layer, then copies the source and runs `go mod tidy` before compiling a static binary
 - **Runtime stage**: `alpine:3.19` with just `tzdata` and `ca-certificates`
 - No Go toolchain or source code in the final image
 - `go.sum` is generated during build — no local Go installation needed
+- GitHub Actions CI uses `cache-from: type=gha` / `cache-to: type=gha,mode=max` to persist Docker layers between workflow runs
+
+### 9. Minimum Keep (minTorrents) Fix
+The original `minTorrents` guard in `engine.go` used `minTorrents < len(matching)` to decide whether to protect torrents from removal. This was inverted — when the matching count was equal to or less than the minimum (e.g. 15 matching with a min keep of 15), the condition was false and all matching torrents became removal candidates instead of being protected.
+
+The fix ensures that when the number of matching torrents is at or below the `minTorrents` threshold, the rule is skipped entirely. Only when there are strictly more matching torrents than the minimum does the engine slice off the protected torrents and evaluate the rest for removal.
 
 ## Known Limitations
 
