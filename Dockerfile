@@ -1,11 +1,13 @@
 # --- Build Stage ---
 FROM golang:1.22-alpine AS builder
 
-RUN apk add --no-cache gcc musl-dev
-
 WORKDIR /src
+
+# Cache dependency downloads in their own layer
+COPY go.mod go.sum* ./
+RUN go mod download
+
 COPY . .
-RUN go mod tidy
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /delegatarr ./cmd/delegatarr
 
 # --- Runtime Stage ---
