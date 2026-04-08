@@ -19,12 +19,9 @@
         </div>
 
         <div class="settings-group">
-            <label class="settings-label" for="tracker_mode">Tracker Reading Mode</label>
-            <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Should Delegatarr read all trackers attached to a torrent, or just the primary tracker?</p>
-            <select id="tracker_mode" name="tracker_mode" style="width: 250px;">
-                <option value="all" {{if eq .AppSettings.TrackerMode "all"}}selected{{end}}>All Trackers</option>
-                <option value="top" {{if eq .AppSettings.TrackerMode "top"}}selected{{end}}>Primary Tracker</option>
-            </select>
+            <label class="settings-label">Tracker Reading Mode</label>
+            <p style="font-size: 13px; color: var(--text-muted); margin-top: 0; margin-bottom: 10px;">Delegatarr currently reads the primary tracker for each torrent. Multi-tracker support is planned for a future release.</p>
+            <input type="hidden" name="tracker_mode" value="top">
         </div>
 
         <div class="settings-group">
