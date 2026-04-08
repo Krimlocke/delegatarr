@@ -234,8 +234,15 @@ func ProcessTorrents(runType string) {
 			sort.Slice(matching, func(i, j int) bool { return matching[i].SeedingHours > matching[j].SeedingHours })
 		}
 
+		// If a minimum-keep count is set, ensure we never drop below it.
+		// When the pool is at or below the minimum, skip this rule entirely.
 		candidates := matching
-		if minTorrents > 0 && minTorrents < len(matching) {
+		if minTorrents > 0 {
+			if len(matching) <= minTorrents {
+				log.Printf("%s Engine Run: Rule '%s' skipped — only %d torrent(s) matched, minimum keep is %d.",
+					runType, targetGroup, len(matching), minTorrents)
+				continue
+			}
 			candidates = matching[minTorrents:]
 		}
 
