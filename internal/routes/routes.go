@@ -97,6 +97,7 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/run_now", runNowHandler).Methods("POST")
 
 	r.HandleFunc("/api/logs", apiLogsHandler).Methods("GET")
+	r.HandleFunc("/api/rule/{index:[0-9]+}", apiRuleHandler).Methods("GET")
 	r.HandleFunc("/manifest.json", manifestHandler).Methods("GET")
 	r.HandleFunc("/sw.js", serviceWorkerHandler).Methods("GET")
 	r.HandleFunc("/favicon.ico", faviconHandler).Methods("GET")
@@ -528,6 +529,25 @@ func apiLogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(getTailLogs(1500)))
+}
+
+func apiRuleHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-API-Token") != apiToken {
+		http.Error(w, "Forbidden", 403)
+		return
+	}
+	idx, _ := strconv.Atoi(mux.Vars(r)["index"])
+
+	engine.ConfigLock.Lock()
+	rules := config.LoadRules()
+	engine.ConfigLock.Unlock()
+
+	if idx < 0 || idx >= len(rules) {
+		http.Error(w, "Not found", 404)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rules[idx])
 }
 
 func manifestHandler(w http.ResponseWriter, r *http.Request) {
