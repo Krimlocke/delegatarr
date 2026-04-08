@@ -237,3 +237,62 @@ option { background-color: var(--bg-main); color: var(--text-main); }
 @media (max-width: 768px) {
     .rule-card-row { flex-direction: column; gap: 8px; }
 }
+/* LOG STYLES */
+.log-line {
+    padding: 3px 8px;
+    border-radius: 3px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+.log-line:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+.log-default {
+    color: var(--text-muted);
+}
+.log-error {
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.08);
+    border-left: 3px solid var(--danger);
+    padding-left: 10px;
+}
+.log-rule {
+    color: var(--accent);
+}
+.log-dryrun {
+    color: var(--warning);
+}
+.log-warn {
+    color: var(--warning);
+    background: rgba(245, 158, 11, 0.06);
+    border-left: 3px solid var(--warning);
+    padding-left: 10px;
+}
+.log-success {
+    color: var(--success);
+}
+.log-system {
+    color: #64748b;
+}
+.log-filter-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+.log-filter-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-main);
+}
+.log-filter-btn.active {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+}
