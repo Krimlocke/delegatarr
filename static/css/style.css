@@ -228,6 +228,55 @@ option { background-color: var(--bg-main); color: var(--text-main); }
     margin-top: 12px;
     padding-top: 10px;
     border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.rule-card-status {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+.status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+.status-dot-danger { background-color: var(--danger); }
+.status-dot-success { background-color: var(--success); }
+.rule-card-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+.btn-ghost {
+    padding: 5px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.2s ease;
+}
+.btn-ghost-edit {
+    color: var(--text-muted);
+}
+.btn-ghost-edit:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(99, 102, 241, 0.08);
+}
+.btn-ghost-delete {
+    color: var(--text-muted);
+}
+.btn-ghost-delete:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.08);
 }
 .rule-card-empty {
     text-align: center;
