@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const AppVersion = "2026.04.08.go"
+const AppVersion = "2026.04.09.go"
 
 var (
 	ConfigDir     = "/config"
