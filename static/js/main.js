@@ -5,7 +5,6 @@ const DelegatarrUI = {
         this.initServiceWorker();
         this.initFlashMessages();
         this.initTimezoneSelect();
-		this.initWizard();
         this.initSearch();
         this.initFilters();
         this.initSorting();
@@ -153,49 +152,6 @@ const DelegatarrUI = {
             }
         });
     },
-	initWizard() {
-        const form = document.getElementById('ruleWizardForm');
-        if (!form) return;
-
-        const steps = form.querySelectorAll('.wizard-step');
-        const progressBar = document.getElementById('wizardBar');
-        const nextBtns = form.querySelectorAll('.btn-next');
-        const prevBtns = form.querySelectorAll('.btn-prev');
-
-        const updateWizard = (targetStepNum) => {
-            // Basic validation before moving forward
-            const currentActive = form.querySelector('.wizard-step.active');
-            const inputs = currentActive.querySelectorAll('input[required]');
-            let isValid = true;
-            inputs.forEach(input => {
-                if (!input.value.trim()) {
-                    input.style.borderColor = 'var(--danger)';
-                    isValid = false;
-                } else {
-                    input.style.borderColor = 'var(--border-color)';
-                }
-            });
-
-            if (!isValid && targetStepNum > parseInt(currentActive.id.split('-')[1])) return;
-
-            // Hide all, show target
-            steps.forEach(step => step.classList.remove('active'));
-            document.getElementById(`step-${targetStepNum}`).classList.add('active');
-
-            // Update progress bar (3 steps total)
-            const progressObj = { 1: '33%', 2: '66%', 3: '100%' };
-            progressBar.style.width = progressObj[targetStepNum];
-        };
-
-        nextBtns.forEach(btn => btn.addEventListener('click', (e) => {
-            updateWizard(parseInt(e.target.dataset.next));
-        }));
-
-        prevBtns.forEach(btn => btn.addEventListener('click', (e) => {
-            updateWizard(parseInt(e.target.dataset.prev));
-        }));
-    },
-
     debounce(func, wait) {
         let timeout;
         return (...args) => {
