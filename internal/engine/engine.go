@@ -34,14 +34,17 @@ func GetDashboardData() (TrackerSummary, []string) {
 		return TrackerSummary{}, nil
 	}
 
+	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
+	labelMap := deluge.FetchLabels(c)
+
 	settings := config.GetSettings()
 	trackerMode := settings.TrackerMode
 
 	summary := TrackerSummary{}
 	labelsSet := map[string]bool{}
 
-	for _, ts := range torrents {
-		t := deluge.FromStatus(ts)
+	for hash, ts := range torrents {
+		t := deluge.FromStatus(ts, labelMap[hash])
 
 		if t.Label != "" {
 			labelsSet[t.Label] = true
@@ -116,6 +119,9 @@ func ProcessTorrents(runType string) {
 		return
 	}
 
+	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
+	labelMap := deluge.FetchLabels(c)
+
 	type removalEntry struct {
 		ID         string
 		Name       string
@@ -152,7 +158,7 @@ func ProcessTorrents(runType string) {
 		var matching []torrentCandidate
 
 		for hash, ts := range torrents {
-			t := deluge.FromStatus(ts)
+			t := deluge.FromStatus(ts, labelMap[hash])
 
 			name := t.Name
 			label := t.Label

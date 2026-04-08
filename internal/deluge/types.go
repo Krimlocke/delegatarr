@@ -12,7 +12,7 @@ const StateUnspecified = delugeclient.StateUnspecified
 // Trackers list, so we build this from the library's struct plus TrackerHost.
 type TorrentInfo struct {
 	Name        string
-	Label       string   // from Label plugin — empty until we add raw RPC support
+	Label       string   // from LabelPlugin.GetTorrentsLabels()
 	State       string
 	SeedingTime int64
 	TimeAdded   float64  // Deluge sends float32, we widen to float64
@@ -23,9 +23,12 @@ type TorrentInfo struct {
 }
 
 // FromStatus converts a go-libdeluge TorrentStatus into our TorrentInfo.
-func FromStatus(ts *delugeclient.TorrentStatus) TorrentInfo {
+// The label parameter comes from LabelPlugin.GetTorrentsLabels() since
+// the library's TorrentStatus struct does not include it.
+func FromStatus(ts *delugeclient.TorrentStatus, label string) TorrentInfo {
 	info := TorrentInfo{
 		Name:        ts.Name,
+		Label:       label,
 		State:       ts.State,
 		SeedingTime: ts.SeedingTime,
 		TimeAdded:   float64(ts.TimeAdded),

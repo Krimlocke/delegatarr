@@ -156,3 +156,24 @@ func IsAlive() bool {
 	cachedAt = time.Now()
 	return alive
 }
+
+// FetchLabels returns a map of torrent hash -> label string using the Label plugin.
+// Returns an empty map (not an error) if the plugin is not enabled.
+func FetchLabels(c *delugeclient.ClientV2) map[string]string {
+	p, err := c.LabelPlugin()
+	if err != nil {
+		log.Printf("Deluge Warning: Could not query Label plugin: %v", err)
+		return map[string]string{}
+	}
+	if p == nil {
+		// Label plugin is not enabled in Deluge
+		return map[string]string{}
+	}
+
+	labels, err := p.GetTorrentsLabels(delugeclient.StateUnspecified, nil)
+	if err != nil {
+		log.Printf("Deluge Warning: Failed to fetch torrent labels: %v", err)
+		return map[string]string{}
+	}
+	return labels
+}
