@@ -19,7 +19,7 @@ const DelegatarrUI = {
         this.trackerTable = document.getElementById('trackerTable');
         this.trackerCount = document.getElementById('trackerCount');
         this.rulesSearch = document.getElementById('rulesSearch');
-        this.rulesTable = document.getElementById('rulesTable');
+        this.rulesGrid = document.getElementById('rulesGrid');
         this.rulesCount = document.getElementById('rulesCount');
         this.fileInput = document.getElementById('settingsUpload');
         this.fileNameDisplay = document.getElementById('fileNameDisplay');
@@ -114,8 +114,8 @@ const DelegatarrUI = {
         if (this.trackerSearch && this.trackerTable) {
             this.setupTableSearch(this.trackerSearch, this.trackerTable, this.trackerCount, false);
         }
-        if (this.rulesSearch && this.rulesTable) {
-            this.setupTableSearch(this.rulesSearch, this.rulesTable, this.rulesCount, true);
+        if (this.rulesSearch && this.rulesGrid) {
+            this.initCardSearch(this.rulesSearch, this.rulesGrid, this.rulesCount);
         }
     },
 
@@ -133,7 +133,7 @@ const DelegatarrUI = {
             th.addEventListener('click', (e) => this.handleSortClick(e.currentTarget));
         });
 
-        [this.trackerTable, this.rulesTable].forEach(table => {
+        [this.trackerTable].forEach(table => {
             if (table && table.id) {
                 const savedColText = localStorage.getItem(table.id + '_sortColText');
                 const savedAsc = localStorage.getItem(table.id + '_sortAsc');
@@ -152,6 +152,40 @@ const DelegatarrUI = {
             }
         });
     },
+    initCardSearch(searchInput, grid, countElement) {
+        if (!searchInput || !grid) return;
+
+        const cards = grid.querySelectorAll('.rule-card');
+        const totalCount = cards.length;
+
+        if (countElement && totalCount > 0) {
+            countElement.textContent = `Showing ${totalCount} total`;
+        }
+
+        searchInput.addEventListener('input', this.debounce(() => {
+            const filter = searchInput.value.toLowerCase();
+            let visibleCount = 0;
+
+            cards.forEach(card => {
+                const searchText = (card.dataset.search || '').toLowerCase() + ' ' + card.textContent.toLowerCase();
+                if (searchText.includes(filter)) {
+                    card.style.display = '';
+                    visibleCount++;
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+
+            if (countElement) {
+                if (filter === '') {
+                    countElement.textContent = totalCount > 0 ? `Showing ${totalCount} total` : '';
+                } else {
+                    countElement.textContent = `Showing ${visibleCount} of ${totalCount}`;
+                }
+            }
+        }, 250));
+    },
+
     debounce(func, wait) {
         let timeout;
         return (...args) => {
