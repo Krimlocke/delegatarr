@@ -101,6 +101,7 @@ func RegisterRoutes(r *mux.Router) {
 
 	r.HandleFunc("/api/logs", apiLogsHandler).Methods("GET")
 	r.HandleFunc("/api/rule/{index:[0-9]+}", apiRuleHandler).Methods("GET")
+	r.HandleFunc("/export_logs", exportLogsHandler).Methods("GET")
 	r.HandleFunc("/manifest.json", manifestHandler).Methods("GET")
 	r.HandleFunc("/sw.js", serviceWorkerHandler).Methods("GET")
 	r.HandleFunc("/favicon.ico", faviconHandler).Methods("GET")
@@ -769,6 +770,18 @@ func apiLogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(getTailLogs(1500)))
+}
+
+func exportLogsHandler(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(config.LogFile)
+	if err != nil {
+		http.Error(w, "No log file found", 404)
+		return
+	}
+	filename := "delegatarr-logs-" + time.Now().Format("2006-01-02") + ".log"
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	w.Write(data)
 }
 
 func apiRuleHandler(w http.ResponseWriter, r *http.Request) {
