@@ -357,8 +357,8 @@ option { background-color: var(--bg-main); color: var(--text-main); }
 .dash-stats {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
+    gap: 10px;
+    margin-bottom: 14px;
 }
 .dash-stat {
     background: var(--bg-card);
@@ -386,12 +386,15 @@ option { background-color: var(--bg-main); color: var(--text-main); }
 .dash-cols {
     display: grid;
     grid-template-columns: 1.6fr 1fr;
-    gap: 16px;
+    gap: 12px;
 }
 .dash-left, .dash-right {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
+}
+.dash-left .card, .dash-right .card {
+    margin-bottom: 0;
 }
 .dash-feed {
     display: flex;
