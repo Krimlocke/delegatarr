@@ -7,7 +7,6 @@
 
     <form action="/save_settings" method="POST">
         {{.CSRFField}}
-        <input type="hidden" name="tracker_mode" value="top">
 
         <div class="settings-row">
             <div class="settings-row-info">
@@ -31,9 +30,12 @@
         <div class="settings-row">
             <div class="settings-row-info">
                 <div class="settings-row-title">Tracker reading mode</div>
-                <div class="settings-row-hint">Primary only (multi-tracker planned)</div>
+                <div class="settings-row-hint">Primary tracker only, or all trackers per torrent</div>
             </div>
-            <span style="font-size: 12px; color: var(--text-muted); background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 4px;">Primary</span>
+            <select name="tracker_mode" style="width: 180px;">
+                <option value="top"{{if eq .AppSettings.TrackerMode "top"}} selected{{end}}>Primary only</option>
+                <option value="all"{{if eq .AppSettings.TrackerMode "all"}} selected{{end}}>All trackers</option>
+            </select>
         </div>
 
         <div class="settings-row">
