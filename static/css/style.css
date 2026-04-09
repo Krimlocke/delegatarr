@@ -183,6 +183,14 @@ option { background-color: var(--bg-main); color: var(--text-main); }
 .rule-card:hover {
     border-color: var(--accent);
 }
+.rule-card-disabled {
+    opacity: 0.5;
+    border-left-color: var(--border-color);
+}
+.rule-card-disabled:hover {
+    border-color: var(--border-color);
+    border-left-color: var(--border-color);
+}
 .rule-card-header {
     display: flex;
     justify-content: space-between;
