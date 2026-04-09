@@ -1,29 +1,30 @@
-{{template "base.html" .}}
-{{define "content"}}
+{% extends "base.html" %}
+
+{% block content %}
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title" id="formTitle">Create New Rule</h3>
-        <button type="button" id="cancelEdit" class="btn" style="display: none; font-size: 12px; padding: 6px 12px;" onclick="cancelEditMode()">Cancel Edit</button>
+        <h3 class="card-title">Create New Rule</h3>
     </div>
 	
-	<form action="/add_rule" method="POST" id="ruleForm" style="margin-bottom: 30px; padding-bottom: 25px; border-bottom: 1px solid var(--border-color);">
-		{{.CSRFField}}
+	<form action="{{ url_for('main.add_rule') }}" method="POST" id="ruleWizardForm" style="margin-bottom: 30px; padding-bottom: 25px; border-bottom: 1px solid var(--border-color);">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
-		<div class="rule-section">
-			<div class="rule-section-header">
-				<span class="rule-section-num">1</span>
-				<span class="rule-section-title">Target</span>
-			</div>
+		<div class="wizard-progress">
+			<div class="wizard-progress-bar" id="wizardBar" style="width: 33%;"></div>
+		</div>
+
+		<div class="wizard-step active" id="step-1">
+			<h4 style="margin-top: 0; margin-bottom: 15px; color: var(--accent);">Step 1: What are we targeting?</h4>
 			<div class="form-row" style="align-items: flex-end;">
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Target Tag</label>
-					<input type="text" list="tagList" name="group_id" class="input-required" placeholder="e.g., ipt" required autocomplete="off">
-					<datalist id="tagList">{{range .UniqueTags}}<option value="{{.}}">{{end}}</datalist>
+					<input type="text" list="tagList" name="group_id" placeholder="e.g., ipt" required autocomplete="off">
+					<datalist id="tagList">{% for tag in unique_tags %}<option value="{{ tag }}">{% endfor %}</datalist>
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Deluge Label</label>
-					<input type="text" list="labelList" name="label" class="input-required" placeholder="e.g., seed" required autocomplete="off">
-					<datalist id="labelList">{{range .UniqueLabels}}<option value="{{.}}">{{end}}</datalist>
+					<input type="text" list="labelList" name="label" placeholder="e.g., seed" required autocomplete="off">
+					<datalist id="labelList">{% for label in unique_labels %}<option value="{{ label }}">{% endfor %}</datalist>
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Torrent State</label>
@@ -34,13 +35,13 @@
 					</select>
 				</div>
 			</div>
+			<div style="margin-top: 20px; text-align: right;">
+				<button type="button" class="btn btn-primary btn-next" data-next="2">Next Step &rarr;</button>
+			</div>
 		</div>
 
-		<div class="rule-section">
-			<div class="rule-section-header">
-				<span class="rule-section-num">2</span>
-				<span class="rule-section-title">Removal Conditions</span>
-			</div>
+		<div class="wizard-step" id="step-2">
+			<h4 style="margin-top: 0; margin-bottom: 15px; color: var(--accent);">Step 2: When should it be removed?</h4>
 			<div class="form-row" style="align-items: flex-end;">
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Time Metric</label>
@@ -53,7 +54,7 @@
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1.5;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Time Threshold</label>
 					<div style="display: flex; gap: 6px;">
-						<input type="number" name="threshold_value" class="input-required" placeholder="Time" step="any" required style="width: 50%;">
+						<input type="number" name="threshold_value" placeholder="Time" step="any" required style="width: 50%;">
 						<select name="threshold_unit" style="width: 50%;">
 							<option value="minutes">Minutes</option>
 							<option value="hours" selected>Hours</option>
@@ -67,20 +68,21 @@
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Ratio Target</label>
-					<input type="number" name="seed_ratio" placeholder="Optional" step="0.01" min="0">
+					<input type="number" name="seed_ratio" placeholder="Ratio >" step="0.01" min="0">
 				</div>
+			</div>
+			<div style="margin-top: 20px; display: flex; justify-content: space-between;">
+				<button type="button" class="btn btn-prev" data-prev="1">&larr; Back</button>
+				<button type="button" class="btn btn-primary btn-next" data-next="3">Next Step &rarr;</button>
 			</div>
 		</div>
 
-		<div class="rule-section">
-			<div class="rule-section-header">
-				<span class="rule-section-num">3</span>
-				<span class="rule-section-title">Protections & Priority</span>
-			</div>
+		<div class="wizard-step" id="step-3">
+			<h4 style="margin-top: 0; margin-bottom: 15px; color: var(--accent);">Step 3: Protections & Priorities</h4>
 			<div class="form-row" style="align-items: flex-end;">
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Min Keep</label>
-					<input type="number" name="min_torrents" class="input-required" placeholder="Min Keep" value="0" required>
+					<input type="number" name="min_torrents" placeholder="Min Keep" value="0" required>
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1.5;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Removal Priority</label>
@@ -99,10 +101,10 @@
 					</label>
 				</div>
 			</div>
-		</div>
-
-		<div style="display: flex; justify-content: flex-end; margin-top: 8px;">
-			<button type="submit" id="formSubmitBtn" class="btn btn-success" style="background-color: var(--success); color: white;">+ Save Rule</button>
+			<div style="margin-top: 20px; display: flex; justify-content: space-between;">
+				<button type="button" class="btn btn-prev" data-prev="2">&larr; Back</button>
+				<button type="submit" class="btn btn-success" style="background-color: var(--success); color: white;">+ Save Rule</button>
+			</div>
 		</div>
 	</form>	
 	
@@ -112,114 +114,58 @@
     </div>
     <input type="text" id="rulesSearch" class="table-search" aria-label="Search rules" placeholder="🔍 Search rules by tag, label, or state...">
     
-    <div id="rulesGrid" class="rules-grid">
-        {{if .RulesList}}
-        {{range $i, $rule := .RulesList}}
-        <div class="rule-card{{if not $rule.IsEnabled}} rule-card-disabled{{end}}" data-search="{{$rule.GroupID}} {{$rule.Label}} {{$rule.TargetState}} {{$rule.TimeMetric}} {{$rule.SortOrder}}">
-            <div class="rule-card-header">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div class="rule-card-tag">{{$rule.GroupID}}</div>
-                    {{if not $rule.IsEnabled}}<span style="font-size: 11px; color: var(--text-muted); font-weight: 500; background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 4px;">Disabled</span>{{end}}
-                </div>
-                <form action="/toggle_rule/{{$i}}" method="POST" style="margin:0;">
-                    {{$.CSRFField}}
-                    <label class="toggle-switch" title="{{if $rule.IsEnabled}}Disable rule{{else}}Enable rule{{end}}">
-                        <input type="checkbox" onchange="this.form.submit()"{{if $rule.IsEnabled}} checked{{end}}>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </form>
-            </div>
-            <div class="rule-card-body">
-                <div class="rule-card-row">
-                    <div class="rule-card-detail">
-                        <span class="rule-card-label">Label</span>
-                        <span class="rule-card-value">{{$rule.Label}}</span>
-                    </div>
-                    <div class="rule-card-detail">
-                        <span class="rule-card-label">State</span>
-                        <span class="rule-card-value">{{$rule.TargetState}}</span>
-                    </div>
-                    <div class="rule-card-detail">
-                        <span class="rule-card-label">Metric</span>
-                        <span class="rule-card-value">{{if eq $rule.TimeMetric "time_added"}}Time Since Added{{else if eq $rule.TimeMetric "time_paused"}}Time Paused{{else}}Seeding Time{{end}}</span>
-                    </div>
-                </div>
-                <div class="rule-card-row">
-                    <div class="rule-card-detail">
-                        <span class="rule-card-label">Threshold</span>
-                        <span class="rule-card-value">> {{$rule.ThresholdValue}} {{$rule.ThresholdUnit}}{{if $rule.SeedRatio}} <span style="color: var(--accent); font-weight: 600; font-size: 12px;">{{$rule.LogicOperator}}</span> Ratio > {{deref $rule.SeedRatio}}{{end}}</span>
-                    </div>
-                    <div class="rule-card-detail">
-                        <span class="rule-card-label">Min Keep</span>
-                        <span class="rule-card-value">{{$rule.MinTorrents}}</span>
-                    </div>
-                    <div class="rule-card-detail">
-                        <span class="rule-card-label">Priority</span>
-                        <span class="rule-card-value">{{if eq $rule.SortOrder "newest_added"}}Newest Added{{else if eq $rule.SortOrder "longest_seeding"}}Longest Seeding{{else if eq $rule.SortOrder "shortest_seeding"}}Shortest Seeding{{else}}Oldest Added{{end}}</span>
-                    </div>
-                </div>
-            </div>
-            <div class="rule-card-footer">
-                <div class="rule-card-status">
-                    {{if $rule.DeleteData}}<span class="status-dot status-dot-danger"></span> Delete data: <strong style="color: var(--danger);">yes</strong>
-                    {{else}}<span class="status-dot status-dot-success"></span> Delete data: <strong style="color: var(--success);">no</strong>{{end}}
-                </div>
-                <div class="rule-card-actions">
-                    <button type="button" class="btn-ghost btn-ghost-edit" onclick="editRule({{$i}})">Edit</button>
-                    <form action="/delete_rule/{{$i}}" method="POST" style="margin:0; display:inline;"
-                          data-confirm-word="DELETE" data-confirm-msg="Delete this rule? Type DELETE to confirm:">
-                        {{$.CSRFField}}
-                        <button type="submit" class="btn-ghost btn-ghost-delete">Delete</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-        {{end}}
-        {{else}}
-        <div class="rule-card-empty">No automation rules configured yet.</div>
-        {{end}}
+    <div class="table-wrapper">
+        <table id="rulesTable">
+            <thead>
+                <tr>
+                    <th class="sortable">Tag</th><th class="sortable">Label</th><th class="sortable">State</th><th class="sortable">Metric</th><th class="sortable">Threshold</th><th class="sortable">Min Keep</th><th>Sorting Priority</th><th>Delete Data?</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rule in rules_list %}
+                <tr>
+                    <td><strong style="color: var(--accent);">{{ rule.get('group_id') }}</strong></td>
+                    <td>{{ rule.get('label') }}</td>
+                    <td><span style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">{{ rule.get('target_state', 'All') }}</span></td>
+                    <td>
+                        {% if rule.get('time_metric') == 'time_added' %}Time Since Added
+                        {% elif rule.get('time_metric') == 'time_paused' %}Time Paused
+                        {% else %}Seeding Time{% endif %}
+                    </td>
+                    <td>
+                        > {{ "%g"|format(rule.get('threshold_value', rule.get('max_hours', 0)) | float) }} {{ rule.get('threshold_unit', 'hours') }}
+                        
+                        {% if rule.get('seed_ratio') is not none %}
+                            <br>
+                            <span style="font-size: 12px; color: var(--accent); font-weight: 600;">
+                                {{ rule.get('logic_operator', 'OR') }}
+                            </span> 
+                            <span style="font-size: 13px; color: var(--text-muted);">
+                                Ratio > {{ rule.get('seed_ratio') }}
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td>{{ rule.get('min_torrents', rule.get('min_keep', 0)) }}</td>
+                    <td style="color: var(--text-muted);">
+                        {% if rule.get('sort_order') == 'newest_added' or rule.get('sort_order') == 'newest_first' %}Newest Added
+                        {% elif rule.get('sort_order') == 'longest_seeding' %}Longest Seeding
+                        {% elif rule.get('sort_order') == 'shortest_seeding' %}Shortest Seeding
+                        {% else %}Oldest Added{% endif %}
+                    </td>
+                    <td>{% if rule.get('delete_data') %}<span class="status-badge-yes">YES</span>{% else %}<span class="status-badge-no">NO</span>{% endif %}</td>
+                    <td style="text-align: right;">
+                        <form action="{{ url_for('main.delete_rule', index=loop.index0) }}" method="POST" style="margin:0;"
+                              data-confirm-word="DELETE" data-confirm-msg="Delete this rule? Type DELETE to confirm:">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button type="submit" class="btn btn-danger" style="padding: 6px 10px; font-size: 12px;">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr data-placeholder="true"><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">No automation rules configured yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
-
-<script>
-function editRule(index) {
-    fetch('/api/rule/' + index, { headers: { 'X-API-Token': '{{.APIToken}}' } })
-        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-        .then(rule => {
-            const form = document.getElementById('ruleForm');
-            form.action = '/edit_rule/' + index;
-
-            form.querySelector('[name="group_id"]').value = rule.group_id || '';
-            form.querySelector('[name="label"]').value = rule.label || '';
-            form.querySelector('[name="target_state"]').value = rule.target_state || 'All';
-            form.querySelector('[name="time_metric"]').value = rule.time_metric || 'seeding_time';
-            form.querySelector('[name="threshold_value"]').value = rule.threshold_value || '';
-            form.querySelector('[name="threshold_unit"]').value = rule.threshold_unit || 'hours';
-            form.querySelector('[name="logic_operator"]').value = rule.logic_operator || 'OR';
-            form.querySelector('[name="seed_ratio"]').value = rule.seed_ratio != null ? rule.seed_ratio : '';
-            form.querySelector('[name="min_torrents"]').value = rule.min_torrents != null ? rule.min_torrents : 0;
-            form.querySelector('[name="sort_order"]').value = rule.sort_order || 'oldest_added';
-
-            const deleteToggle = document.getElementById('delete_data_toggle');
-            deleteToggle.checked = !!rule.delete_data;
-
-            document.getElementById('formTitle').textContent = 'Edit Rule';
-            document.getElementById('formSubmitBtn').textContent = 'Update Rule';
-            document.getElementById('cancelEdit').style.display = '';
-
-            document.querySelector('.main-content').scrollTo({ top: 0, behavior: 'smooth' });
-        })
-        .catch(err => console.error('Failed to load rule:', err));
-}
-
-function cancelEditMode() {
-    const form = document.getElementById('ruleForm');
-    form.action = '/add_rule';
-    form.reset();
-
-    document.getElementById('formTitle').textContent = 'Create New Rule';
-    document.getElementById('formSubmitBtn').textContent = '+ Save Rule';
-    document.getElementById('cancelEdit').style.display = 'none';
-}
-</script>
-{{end}}
+{% endblock %}
