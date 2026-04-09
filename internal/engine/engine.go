@@ -75,6 +75,14 @@ func GetDashboardData() (TrackerSummary, []string) {
 		labels = append(labels, l)
 	}
 	sort.Strings(labels)
+
+	// Migrate Python-style tracker domains to Go-style if needed
+	activeDomains := make([]string, 0, len(summary))
+	for domain := range summary {
+		activeDomains = append(activeDomains, domain)
+	}
+	config.MigrateGroups(activeDomains)
+
 	return summary, labels
 }
 
