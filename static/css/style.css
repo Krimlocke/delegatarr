@@ -126,7 +126,8 @@ option { background-color: var(--bg-main); color: var(--text-main); }
     .card { padding: 15px; }
     table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
     .form-row { flex-direction: column; align-items: stretch; gap: 10px; }
-    .form-row input, .form-row select, .form-row button, .form-row label { width: 100% !important; margin-left: 0 !important; }
+    .form-row input, .form-row select, .form-row button, .form-row > label:not(.toggle-switch) { width: 100% !important; margin-left: 0 !important; }
+    .form-row .toggle-switch { width: 44px !important; }
     .data-management-row, .data-actions { flex-direction: column; width: 100%; align-items: stretch; }
     .data-actions form { display: flex; flex-direction: column; width: 100%; gap: 10px; }
     .btn { width: 100%; justify-content: center; }
