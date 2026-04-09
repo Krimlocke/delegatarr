@@ -42,6 +42,9 @@ func GetDashboardData() (TrackerSummary, []string) {
 	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
 	labelMap := deluge.FetchLabels(c)
 
+	// Fetch full tracker URLs via raw RPC (nil if unavailable — falls back to TrackerHost)
+	fullTrackers := deluge.FetchTrackerURLs()
+
 	settings := config.GetSettings()
 	trackerMode := settings.TrackerMode
 
@@ -49,7 +52,7 @@ func GetDashboardData() (TrackerSummary, []string) {
 	labelsSet := map[string]bool{}
 
 	for hash, ts := range torrents {
-		t := deluge.FromStatus(ts, labelMap[hash])
+		t := deluge.FromStatus(ts, labelMap[hash], fullTrackers[hash])
 
 		if t.Label != "" {
 			labelsSet[t.Label] = true
@@ -135,11 +138,14 @@ func ProcessTorrents(runType string) {
 	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
 	labelMap := deluge.FetchLabels(c)
 
+	// Fetch full tracker URLs via raw RPC (nil if unavailable — falls back to TrackerHost)
+	fullTrackers := deluge.FetchTrackerURLs()
+
 	// Detect untagged trackers and notify
 	if settings.NotifyUntagged && settings.WebhookURL != "" {
 		untaggedSet := map[string]bool{}
-		for _, ts := range torrents {
-			t := deluge.FromStatus(ts, "")
+		for hash, ts := range torrents {
+			t := deluge.FromStatus(ts, "", fullTrackers[hash])
 			trackerURLs := extractTrackerURLs(t)
 			for _, rawURL := range trackerURLs {
 				domain := extractDomain(rawURL)
@@ -205,7 +211,7 @@ func ProcessTorrents(runType string) {
 		var matching []torrentCandidate
 
 		for hash, ts := range torrents {
-			t := deluge.FromStatus(ts, labelMap[hash])
+			t := deluge.FromStatus(ts, labelMap[hash], fullTrackers[hash])
 
 			name := t.Name
 			label := t.Label
