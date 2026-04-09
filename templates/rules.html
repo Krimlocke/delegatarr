@@ -207,7 +207,7 @@ function editRule(index) {
             document.getElementById('formSubmitBtn').textContent = 'Update Rule';
             document.getElementById('cancelEdit').style.display = '';
 
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            document.querySelector('.main-content').scrollTo({ top: 0, behavior: 'smooth' });
         })
         .catch(err => console.error('Failed to load rule:', err));
 }
