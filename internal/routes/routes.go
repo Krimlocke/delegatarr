@@ -20,6 +20,7 @@ import (
 	"github.com/krimlocke/delegatarr/internal/config"
 	"github.com/krimlocke/delegatarr/internal/deluge"
 	"github.com/krimlocke/delegatarr/internal/engine"
+	"github.com/krimlocke/delegatarr/internal/notify"
 )
 
 var (
@@ -88,6 +89,8 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/settings", settingsHandler).Methods("GET")
 
 	r.HandleFunc("/save_settings", saveSettingsHandler).Methods("POST")
+	r.HandleFunc("/save_notifications", saveNotificationsHandler).Methods("POST")
+	r.HandleFunc("/test_webhook", testWebhookHandler).Methods("POST")
 	r.HandleFunc("/export_settings", exportSettingsHandler).Methods("GET")
 	r.HandleFunc("/import_settings", importSettingsHandler).Methods("POST")
 	r.HandleFunc("/factory_reset_settings", factoryResetSettingsHandler).Methods("POST")
@@ -97,6 +100,7 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/edit_rule/{index:[0-9]+}", editRuleHandler).Methods("POST")
 	r.HandleFunc("/toggle_rule/{index:[0-9]+}", toggleRuleHandler).Methods("POST")
 	r.HandleFunc("/delete_rule/{index:[0-9]+}", deleteRuleHandler).Methods("POST")
+	r.HandleFunc("/bulk_rules", bulkRulesHandler).Methods("POST")
 	r.HandleFunc("/run_now", runNowHandler).Methods("POST")
 
 	r.HandleFunc("/api/logs", apiLogsHandler).Methods("GET")
@@ -526,6 +530,57 @@ func saveSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/settings", http.StatusFound)
 }
 
+func saveNotificationsHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	engine.ConfigLock.Lock()
+	s := config.GetSettings()
+
+	s.WebhookType = truncStr(strings.TrimSpace(r.FormValue("webhook_type")), 20)
+	s.WebhookURL = truncStr(strings.TrimSpace(r.FormValue("webhook_url")), 500)
+	s.NotifyRemovals = r.FormValue("notify_removals") != ""
+	s.NotifyUntagged = r.FormValue("notify_untagged") != ""
+
+	// Clear URL if type is disabled
+	if s.WebhookType == "" {
+		s.WebhookURL = ""
+		s.NotifyRemovals = false
+		s.NotifyUntagged = false
+	}
+
+	if err := config.SaveJSON(config.SettingsFile, s); err != nil {
+		engine.ConfigLock.Unlock()
+		setFlash(w, "error", "Failed to save notification settings.")
+		http.Redirect(w, r, "/settings", http.StatusFound)
+		return
+	}
+	engine.ConfigLock.Unlock()
+
+	log.Printf("System: Notification settings updated. Type: %s, Removals: %v, Untagged: %v",
+		s.WebhookType, s.NotifyRemovals, s.NotifyUntagged)
+	setFlash(w, "success", "Notification settings saved.")
+	http.Redirect(w, r, "/settings", http.StatusFound)
+}
+
+func testWebhookHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	url := strings.TrimSpace(r.FormValue("webhook_url"))
+	webhookType := strings.TrimSpace(r.FormValue("webhook_type"))
+
+	if url == "" || webhookType == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "URL and type required"})
+		return
+	}
+
+	// Send a test notification directly (does not require saving settings)
+	notify.SendTestNotification(url, webhookType)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
 func exportSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	engine.ConfigLock.Lock()
 	backup := map[string]interface{}{
@@ -682,11 +737,21 @@ func addRuleHandler(w http.ResponseWriter, r *http.Request) {
 
 	engine.ConfigLock.Lock()
 	rules := config.LoadRules()
+
+	// Check for duplicate tag + label + state combination
+	dupIdx := findDuplicateRule(rules, rule, -1)
+
 	rules = append(rules, rule)
 	config.SaveJSON(config.RulesFile, rules)
 	engine.ConfigLock.Unlock()
 
-	setFlash(w, "success", "Rule added successfully.")
+	if dupIdx >= 0 {
+		setFlash(w, "warning", fmt.Sprintf(
+			"Rule added, but note: rule #%d already targets the same Tag '%s' + Label '%s' + State '%s'. This may cause conflicts.",
+			dupIdx+1, rule.GroupID, rule.Label, rule.TargetState))
+	} else {
+		setFlash(w, "success", "Rule added successfully.")
+	}
 	http.Redirect(w, r, "/rules", http.StatusFound)
 }
 
@@ -704,10 +769,17 @@ func editRuleHandler(w http.ResponseWriter, r *http.Request) {
 	engine.ConfigLock.Lock()
 	rules := config.LoadRules()
 	if idx >= 0 && idx < len(rules) {
+		// Check for duplicate tag + label + state combination (excluding self)
+		if dupIdx := findDuplicateRule(rules, rule, idx); dupIdx >= 0 {
+			setFlash(w, "warning", fmt.Sprintf(
+				"Rule updated, but note: rule #%d already targets the same Tag '%s' + Label '%s' + State '%s'. This may cause conflicts.",
+				dupIdx+1, rule.GroupID, rule.Label, rule.TargetState))
+		} else {
+			setFlash(w, "success", "Rule updated successfully.")
+		}
 		rule.Enabled = rules[idx].Enabled
 		rules[idx] = rule
 		config.SaveJSON(config.RulesFile, rules)
-		setFlash(w, "success", "Rule updated successfully.")
 	} else {
 		setFlash(w, "error", "Rule not found.")
 	}
@@ -749,6 +821,69 @@ func deleteRuleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	engine.ConfigLock.Unlock()
 
+	http.Redirect(w, r, "/rules", http.StatusFound)
+}
+
+func bulkRulesHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	action := r.FormValue("bulk_action")
+
+	// Parse selected indices
+	var indices []int
+	for _, v := range r.Form["rule_indices"] {
+		if idx, err := strconv.Atoi(v); err == nil {
+			indices = append(indices, idx)
+		}
+	}
+
+	if len(indices) == 0 {
+		setFlash(w, "error", "No rules selected.")
+		http.Redirect(w, r, "/rules", http.StatusFound)
+		return
+	}
+
+	engine.ConfigLock.Lock()
+	rules := config.LoadRules()
+
+	switch action {
+	case "enable":
+		enabled := true
+		for _, idx := range indices {
+			if idx >= 0 && idx < len(rules) {
+				rules[idx].Enabled = &enabled
+			}
+		}
+		config.SaveJSON(config.RulesFile, rules)
+		setFlash(w, "success", fmt.Sprintf("%d rule(s) enabled.", len(indices)))
+
+	case "disable":
+		disabled := false
+		for _, idx := range indices {
+			if idx >= 0 && idx < len(rules) {
+				rules[idx].Enabled = &disabled
+			}
+		}
+		config.SaveJSON(config.RulesFile, rules)
+		setFlash(w, "warning", fmt.Sprintf("%d rule(s) disabled.", len(indices)))
+
+	case "delete":
+		// Delete in reverse order to keep indices stable
+		sort.Sort(sort.Reverse(sort.IntSlice(indices)))
+		deleted := 0
+		for _, idx := range indices {
+			if idx >= 0 && idx < len(rules) {
+				rules = append(rules[:idx], rules[idx+1:]...)
+				deleted++
+			}
+		}
+		config.SaveJSON(config.RulesFile, rules)
+		setFlash(w, "warning", fmt.Sprintf("%d rule(s) deleted.", deleted))
+
+	default:
+		setFlash(w, "error", "Unknown bulk action.")
+	}
+
+	engine.ConfigLock.Unlock()
 	http.Redirect(w, r, "/rules", http.StatusFound)
 }
 
@@ -942,6 +1077,22 @@ func truncStr(s string, max int) string {
 		return s[:max]
 	}
 	return s
+}
+
+// findDuplicateRule checks if any existing rule (excluding excludeIdx) shares the same
+// tag + label + state combination. Returns the index of the first duplicate or -1.
+func findDuplicateRule(rules []config.Rule, candidate config.Rule, excludeIdx int) int {
+	for i, r := range rules {
+		if i == excludeIdx {
+			continue
+		}
+		if strings.EqualFold(r.GroupID, candidate.GroupID) &&
+			strings.EqualFold(r.Label, candidate.Label) &&
+			strings.EqualFold(r.TargetState, candidate.TargetState) {
+			return i
+		}
+	}
+	return -1
 }
 
 func formatTimeAgo(t time.Time, now time.Time) string {
