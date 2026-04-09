@@ -30,10 +30,11 @@ var (
 	RescheduleFunc func(minutes int) error
 
 	safeReturnURLs = map[string]bool{
-		"/trackers": true,
-		"/rules":    true,
-		"/logs":     true,
-		"/settings": true,
+		"/dashboard": true,
+		"/trackers":  true,
+		"/rules":     true,
+		"/logs":      true,
+		"/settings":  true,
 	}
 )
 
@@ -65,7 +66,7 @@ func LoadTemplates(dir string) error {
 
 	basePath := filepath.Join(dir, "base.html")
 
-	pages := []string{"trackers.html", "rules.html", "logs.html", "settings.html"}
+	pages := []string{"dashboard.html", "trackers.html", "rules.html", "logs.html", "settings.html"}
 	for _, page := range pages {
 		pagePath := filepath.Join(dir, page)
 		t, err := template.New("").Funcs(funcMap).ParseFiles(pagePath, basePath)
@@ -80,6 +81,7 @@ func LoadTemplates(dir string) error {
 // RegisterRoutes sets up all HTTP routes on the given router.
 func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/", indexHandler).Methods("GET")
+	r.HandleFunc("/dashboard", dashboardHandler).Methods("GET")
 	r.HandleFunc("/trackers", trackersHandler).Methods("GET")
 	r.HandleFunc("/rules", rulesHandler).Methods("GET")
 	r.HandleFunc("/logs", logsHandler).Methods("GET")
@@ -123,11 +125,46 @@ type pageData struct {
 	UniqueTags     []string
 	UniqueLabels   []string
 	LogContent     string
+
+	// Dashboard data
+	DashTotalTorrents int
+	DashTrackerCount  int
+	DashRemovedToday  int
+	DashRemovedWeek   int
+	DashActiveRules   int
+	DashDisabledRules int
+	DashRecentEvents  []DashEvent
+	DashRuleStats     []DashRuleStat
+	DashTrackerStats  []DashTrackerStat
+	DashUptime        string
+	DashLastRun       string
+	DashNextRun       string
+	DashInterval      int
 }
 
 type flashMsg struct {
 	Category string
 	Message  string
+}
+
+// Dashboard types
+type DashEvent struct {
+	Color   string
+	Text    string
+	Detail  string
+	TimeAgo string
+}
+
+type DashRuleStat struct {
+	Tag     string
+	Count   int
+	Percent int
+}
+
+type DashTrackerStat struct {
+	Name    string
+	Count   int
+	Percent int
 }
 
 // flash message support via cookies (simple approach)
@@ -181,7 +218,187 @@ func renderPage(w http.ResponseWriter, r *http.Request, tmplName string, data *p
 // --- Handlers ---
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/trackers", http.StatusFound)
+	http.Redirect(w, r, "/dashboard", http.StatusFound)
+}
+
+func dashboardHandler(w http.ResponseWriter, r *http.Request) {
+	summary, _ := engine.GetDashboardData()
+	settings := config.GetSettings()
+
+	engine.ConfigLock.Lock()
+	rules := config.LoadRules()
+	engine.ConfigLock.Unlock()
+
+	// Count active/disabled rules
+	activeRules, disabledRules := 0, 0
+	for _, rule := range rules {
+		if rule.IsEnabled() {
+			activeRules++
+		} else {
+			disabledRules++
+		}
+	}
+
+	// Total torrents and tracker count
+	totalTorrents := 0
+	for _, count := range summary {
+		totalTorrents += count
+	}
+
+	// Parse logs for recent events and removal stats
+	logData, _ := os.ReadFile(config.LogFile)
+	logLines := strings.Split(strings.TrimRight(string(logData), "\n"), "\n")
+
+	now := time.Now()
+	todayStr := now.Format("2006-01-02")
+	weekAgo := now.AddDate(0, 0, -7)
+
+	var recentEvents []DashEvent
+	ruleRemovalCounts := map[string]int{}
+	removedToday, removedWeek := 0, 0
+
+	// Process logs in reverse (newest first) for recent events
+	for i := len(logLines) - 1; i >= 0; i-- {
+		line := logLines[i]
+		if len(line) < 20 {
+			continue
+		}
+
+		// Parse timestamp
+		tsStr := ""
+		if line[0] == '[' {
+			if end := strings.Index(line, "]"); end > 0 {
+				tsStr = line[1:end]
+			}
+		}
+
+		lineTime, _ := time.ParseInLocation("2006-01-02 15:04:05", tsStr, time.Local)
+		lower := strings.ToLower(line)
+
+		// Count removals
+		if strings.Contains(lower, "rule matched") && strings.Contains(lower, "removed:") {
+			if strings.Contains(tsStr, todayStr) {
+				removedToday++
+			}
+			if !lineTime.IsZero() && lineTime.After(weekAgo) {
+				removedWeek++
+				// Extract tag from "(Tag: xxx,"
+				if tagIdx := strings.Index(line, "(Tag: "); tagIdx >= 0 {
+					rest := line[tagIdx+6:]
+					if commaIdx := strings.Index(rest, ","); commaIdx >= 0 {
+						tag := rest[:commaIdx]
+						ruleRemovalCounts[tag]++
+					}
+				}
+			}
+		}
+
+		// Build recent events (max 8)
+		if len(recentEvents) < 8 {
+			var ev *DashEvent
+			if strings.Contains(lower, "rule matched") && strings.Contains(lower, "removed:") {
+				name := ""
+				if nameStart := strings.Index(line, "Removed: '"); nameStart >= 0 {
+					rest := line[nameStart+10:]
+					if nameEnd := strings.Index(rest, "'"); nameEnd >= 0 {
+						name = rest[:nameEnd]
+						if len(name) > 45 {
+							name = name[:42] + "..."
+						}
+					}
+				}
+				tag := ""
+				if tagIdx := strings.Index(line, "(Tag: "); tagIdx >= 0 {
+					rest := line[tagIdx+6:]
+					if commaIdx := strings.Index(rest, ","); commaIdx >= 0 {
+						tag = rest[:commaIdx]
+					}
+				}
+				ev = &DashEvent{Color: "accent", Text: name + " removed", Detail: "Tag: " + tag}
+			} else if strings.Contains(lower, "skipped") && strings.Contains(lower, "minimum keep") {
+				ev = &DashEvent{Color: "warning", Text: "Rule skipped — below minimum keep"}
+			} else if strings.Contains(lower, "error") || strings.Contains(lower, "failed") {
+				msg := line
+				if bracketEnd := strings.Index(msg, "] "); bracketEnd >= 0 {
+					msg = msg[bracketEnd+2:]
+				}
+				if len(msg) > 60 {
+					msg = msg[:57] + "..."
+				}
+				ev = &DashEvent{Color: "danger", Text: msg}
+			} else if strings.Contains(lower, "completed. successfully") {
+				ev = &DashEvent{Color: "success", Text: "Engine run completed"}
+			} else if strings.Contains(lower, "no torrents met removal criteria") {
+				ev = &DashEvent{Color: "muted", Text: "No torrents met removal criteria", Detail: "Scheduled run"}
+			} else if strings.Contains(lower, "deluge connection established") {
+				ev = &DashEvent{Color: "success", Text: "Deluge connection established", Detail: "System"}
+			}
+
+			if ev != nil {
+				ev.TimeAgo = formatTimeAgo(lineTime, now)
+				recentEvents = append(recentEvents, *ev)
+			}
+		}
+	}
+
+	// Build rule stats sorted by count
+	var ruleStats []DashRuleStat
+	maxRemovals := 0
+	for _, count := range ruleRemovalCounts {
+		if count > maxRemovals {
+			maxRemovals = count
+		}
+	}
+	for tag, count := range ruleRemovalCounts {
+		pct := 0
+		if maxRemovals > 0 {
+			pct = (count * 100) / maxRemovals
+		}
+		ruleStats = append(ruleStats, DashRuleStat{Tag: tag, Count: count, Percent: pct})
+	}
+	sort.Slice(ruleStats, func(i, j int) bool { return ruleStats[i].Count > ruleStats[j].Count })
+
+	// Build tracker stats
+	var trackerStats []DashTrackerStat
+	maxTorrents := 0
+	for _, count := range summary {
+		if count > maxTorrents {
+			maxTorrents = count
+		}
+	}
+	for domain, count := range summary {
+		pct := 0
+		if maxTorrents > 0 {
+			pct = (count * 100) / maxTorrents
+		}
+		trackerStats = append(trackerStats, DashTrackerStat{Name: domain, Count: count, Percent: pct})
+	}
+	sort.Slice(trackerStats, func(i, j int) bool { return trackerStats[i].Count > trackerStats[j].Count })
+
+	// Uptime
+	uptime := formatDuration(time.Since(config.StartTime))
+
+	// Next/last run estimates
+	interval := settings.RunInterval
+	if interval < 1 {
+		interval = 15
+	}
+
+	renderPage(w, r, "dashboard.html", &pageData{
+		ActivePage:        "dashboard",
+		PageTitle:         "Dashboard",
+		DashTotalTorrents: totalTorrents,
+		DashTrackerCount:  len(summary),
+		DashRemovedToday:  removedToday,
+		DashRemovedWeek:   removedWeek,
+		DashActiveRules:   activeRules,
+		DashDisabledRules: disabledRules,
+		DashRecentEvents:  recentEvents,
+		DashRuleStats:     ruleStats,
+		DashTrackerStats:  trackerStats,
+		DashUptime:        uptime,
+		DashInterval:      interval,
+	})
 }
 
 func trackersHandler(w http.ResponseWriter, r *http.Request) {
@@ -712,4 +929,46 @@ func truncStr(s string, max int) string {
 		return s[:max]
 	}
 	return s
+}
+
+func formatTimeAgo(t time.Time, now time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		m := int(d.Minutes())
+		if m == 1 {
+			return "1m ago"
+		}
+		return fmt.Sprintf("%dm ago", m)
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		if h == 1 {
+			return "1h ago"
+		}
+		return fmt.Sprintf("%dh ago", h)
+	default:
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1d ago"
+		}
+		return fmt.Sprintf("%dd ago", days)
+	}
+}
+
+func formatDuration(d time.Duration) string {
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh", days, hours)
+	}
+	minutes := int(d.Minutes()) % 60
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	return fmt.Sprintf("%dm", minutes)
 }
