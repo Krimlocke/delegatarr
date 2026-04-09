@@ -68,6 +68,12 @@ type Rule struct {
 	DeleteData     bool     `json:"delete_data"`
 	LogicOperator  string   `json:"logic_operator"`
 	SeedRatio      *float64 `json:"seed_ratio"` // nil means not set
+	Enabled        *bool    `json:"enabled"`     // nil treated as true (backwards compat)
+}
+
+// IsEnabled returns whether the rule is active. Nil defaults to true.
+func (r Rule) IsEnabled() bool {
+	return r.Enabled == nil || *r.Enabled
 }
 
 // Groups is a map of tracker domain -> tag name.
