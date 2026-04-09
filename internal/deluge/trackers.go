@@ -67,9 +67,11 @@ func rawConnect(hostname string, portNum int, login, password string) (*rawConn,
 
 	rc := &rawConn{tls: tlsConn}
 
-	// Login: daemon.login(username, password, client_version)
-	args := rencode.NewList(login, password, "delegatarr")
-	_, err = rc.call("daemon.login", args, rencode.Dictionary{})
+	// Login: daemon.login(username, password) with client_version as kwarg for v2
+	args := rencode.NewList(login, password)
+	var kwargs rencode.Dictionary
+	kwargs.Add("client_version", "2.0.3")
+	_, err = rc.call("daemon.login", args, kwargs)
 	if err != nil {
 		tlsConn.Close()
 		return nil, fmt.Errorf("login: %w", err)
