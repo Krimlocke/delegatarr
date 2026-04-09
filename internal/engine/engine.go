@@ -9,11 +9,16 @@ import (
 
 	"github.com/krimlocke/delegatarr/internal/config"
 	"github.com/krimlocke/delegatarr/internal/deluge"
+	"github.com/krimlocke/delegatarr/internal/notify"
 )
 
 var (
 	EngineLock sync.Mutex
 	ConfigLock sync.Mutex
+
+	// lastNotifiedUntagged tracks which untagged trackers we already notified about
+	// so we don't spam on every engine run.
+	lastNotifiedUntagged string
 )
 
 // TrackerSummary maps tracker domain -> torrent count.
@@ -121,6 +126,37 @@ func ProcessTorrents(runType string) {
 
 	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
 	labelMap := deluge.FetchLabels(c)
+
+	// Detect untagged trackers and notify
+	if settings.NotifyUntagged && settings.WebhookURL != "" {
+		untaggedSet := map[string]bool{}
+		for _, ts := range torrents {
+			t := deluge.FromStatus(ts, "")
+			trackerURLs := extractTrackerURLs(t)
+			for _, rawURL := range trackerURLs {
+				domain := extractDomain(rawURL)
+				if domain != "" {
+					if _, tagged := groups[domain]; !tagged {
+						untaggedSet[domain] = true
+					}
+				}
+			}
+		}
+		if len(untaggedSet) > 0 {
+			var untagged []string
+			for d := range untaggedSet {
+				untagged = append(untagged, d)
+			}
+			sort.Strings(untagged)
+			fingerprint := strings.Join(untagged, ",")
+			if fingerprint != lastNotifiedUntagged {
+				lastNotifiedUntagged = fingerprint
+				notify.SendUntaggedTrackerNotification(untagged)
+			}
+		} else {
+			lastNotifiedUntagged = ""
+		}
+	}
 
 	type removalEntry struct {
 		ID         string
@@ -286,11 +322,14 @@ func ProcessTorrents(runType string) {
 		return
 	}
 
+	var notifyEntries []notify.RemovalEntry
+
 	for _, entry := range toRemove {
 		if isDryRun {
 			log.Printf("[DRY RUN] Would have removed: '%s' (Tag: %s, State: %s, Metric: %s, Delete Data: %v)",
 				entry.Name, entry.Tag, entry.State, entry.Metric, entry.DeleteData)
 			removedCount++
+			notifyEntries = append(notifyEntries, notify.RemovalEntry{Name: entry.Name, Tag: entry.Tag, State: entry.State})
 		} else {
 			if _, err := c.RemoveTorrent(entry.ID, entry.DeleteData); err != nil {
 				log.Printf("Failed to remove '%s': %v", entry.Name, err)
@@ -298,8 +337,14 @@ func ProcessTorrents(runType string) {
 				log.Printf("Rule Matched! Removed: '%s' (Tag: %s, State: %s, Metric: %s, Delete Data: %v)",
 					entry.Name, entry.Tag, entry.State, entry.Metric, entry.DeleteData)
 				removedCount++
+				notifyEntries = append(notifyEntries, notify.RemovalEntry{Name: entry.Name, Tag: entry.Tag, State: entry.State})
 			}
 		}
+	}
+
+	// Send webhook notification for removals
+	if len(notifyEntries) > 0 {
+		notify.SendRemovalNotification(notifyEntries, isDryRun)
 	}
 
 	modeText := ""
