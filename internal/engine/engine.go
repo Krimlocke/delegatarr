@@ -135,6 +135,9 @@ func ProcessTorrents(runType string) {
 	seenIDs := map[string]bool{}
 
 	for _, rule := range rules {
+		if !rule.IsEnabled() {
+			continue
+		}
 		targetGroup := rule.GroupID
 		targetLabel := rule.Label
 		targetState := rule.TargetState
