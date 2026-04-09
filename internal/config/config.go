@@ -19,6 +19,7 @@ var (
 	RulesFile     string
 	SettingsFile  string
 	LogoFile      string
+	StartTime     = time.Now()
 )
 
 func init() {
