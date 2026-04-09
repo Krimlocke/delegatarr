@@ -115,9 +115,19 @@
     <div id="rulesGrid" class="rules-grid">
         {{if .RulesList}}
         {{range $i, $rule := .RulesList}}
-        <div class="rule-card" data-search="{{$rule.GroupID}} {{$rule.Label}} {{$rule.TargetState}} {{$rule.TimeMetric}} {{$rule.SortOrder}}">
+        <div class="rule-card{{if not $rule.IsEnabled}} rule-card-disabled{{end}}" data-search="{{$rule.GroupID}} {{$rule.Label}} {{$rule.TargetState}} {{$rule.TimeMetric}} {{$rule.SortOrder}}">
             <div class="rule-card-header">
-                <div class="rule-card-tag">{{$rule.GroupID}}</div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="rule-card-tag">{{$rule.GroupID}}</div>
+                    {{if not $rule.IsEnabled}}<span style="font-size: 11px; color: var(--text-muted); font-weight: 500; background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 4px;">Disabled</span>{{end}}
+                </div>
+                <form action="/toggle_rule/{{$i}}" method="POST" style="margin:0;">
+                    {{$.CSRFField}}
+                    <label class="toggle-switch" title="{{if $rule.IsEnabled}}Disable rule{{else}}Enable rule{{end}}">
+                        <input type="checkbox" onchange="this.form.submit()"{{if $rule.IsEnabled}} checked{{end}}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </form>
             </div>
             <div class="rule-card-body">
                 <div class="rule-card-row">
@@ -197,7 +207,7 @@ function editRule(index) {
             document.getElementById('formSubmitBtn').textContent = 'Update Rule';
             document.getElementById('cancelEdit').style.display = '';
 
-            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         })
         .catch(err => console.error('Failed to load rule:', err));
 }
