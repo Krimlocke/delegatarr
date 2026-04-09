@@ -93,6 +93,7 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/update_groups", updateGroupsHandler).Methods("POST")
 	r.HandleFunc("/add_rule", addRuleHandler).Methods("POST")
 	r.HandleFunc("/edit_rule/{index:[0-9]+}", editRuleHandler).Methods("POST")
+	r.HandleFunc("/toggle_rule/{index:[0-9]+}", toggleRuleHandler).Methods("POST")
 	r.HandleFunc("/delete_rule/{index:[0-9]+}", deleteRuleHandler).Methods("POST")
 	r.HandleFunc("/run_now", runNowHandler).Methods("POST")
 
@@ -485,11 +486,33 @@ func editRuleHandler(w http.ResponseWriter, r *http.Request) {
 	engine.ConfigLock.Lock()
 	rules := config.LoadRules()
 	if idx >= 0 && idx < len(rules) {
+		rule.Enabled = rules[idx].Enabled
 		rules[idx] = rule
 		config.SaveJSON(config.RulesFile, rules)
 		setFlash(w, "success", "Rule updated successfully.")
 	} else {
 		setFlash(w, "error", "Rule not found.")
+	}
+	engine.ConfigLock.Unlock()
+
+	http.Redirect(w, r, "/rules", http.StatusFound)
+}
+
+func toggleRuleHandler(w http.ResponseWriter, r *http.Request) {
+	idx, _ := strconv.Atoi(mux.Vars(r)["index"])
+
+	engine.ConfigLock.Lock()
+	rules := config.LoadRules()
+	if idx >= 0 && idx < len(rules) {
+		current := rules[idx].IsEnabled()
+		toggled := !current
+		rules[idx].Enabled = &toggled
+		config.SaveJSON(config.RulesFile, rules)
+		if toggled {
+			setFlash(w, "success", "Rule enabled.")
+		} else {
+			setFlash(w, "warning", "Rule disabled.")
+		}
 	}
 	engine.ConfigLock.Unlock()
 
@@ -643,6 +666,7 @@ func parseRuleForm(r *http.Request) config.Rule {
 		label = label[:100]
 	}
 
+	enabled := true
 	return config.Rule{
 		GroupID:        strings.TrimSpace(groupID),
 		Label:          strings.TrimSpace(label),
@@ -655,6 +679,7 @@ func parseRuleForm(r *http.Request) config.Rule {
 		DeleteData:     r.FormValue("delete_data") != "",
 		LogicOperator:  truncStr(r.FormValue("logic_operator"), 10),
 		SeedRatio:      seedRatio,
+		Enabled:        &enabled,
 	}
 }
 
