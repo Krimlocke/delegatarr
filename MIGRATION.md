@@ -10,6 +10,7 @@
 | `delegatarr/engine.py`        | `internal/engine/engine.go` + `helpers.go` |
 | `delegatarr/routes.py`        | `internal/routes/routes.go`             |
 | *(new)*                       | `internal/notify/notify.go`             |
+| *(new)*                       | `internal/deluge/trackers.go`           |
 | Flask Blueprint               | `gorilla/mux` Router                    |
 | Jinja2 templates              | Go `html/template`                      |
 | APScheduler                   | `go-co-op/gocron`                       |
@@ -91,18 +92,26 @@ Settings page has a dedicated "Webhook Notifications" section with type selector
 
 Notification settings are stored in `settings.json` alongside existing settings (`webhook_url`, `webhook_type`, `notify_removals`, `notify_untagged`) and are fully included in config export/import.
 
+### 13. Multi-Tracker Support via Raw RPC
+The `go-libdeluge` library only exposes `TrackerHost` — a single shortened hostname per torrent (e.g. `td-peers.com`). The Python version used raw RPC to fetch the full `trackers` list with complete URLs (e.g. `https://sync.td-peers.com/announce`).
+
+A new `internal/deluge/trackers.go` file implements a standalone raw RPC client using `go-rencode` that connects to the Deluge daemon alongside the main library connection. It calls `core.get_torrents_status({}, ["trackers"])` to retrieve the full tracker URL list per torrent. This runs once per engine cycle and once per dashboard load.
+
+`FromStatus` in `types.go` now accepts an optional tracker URL list parameter. When provided, the full URLs are used for domain extraction instead of the library's `TrackerHost`. The "Tracker Reading Mode" setting in Settings is now functional — users can choose between "Primary only" (first tracker) and "All trackers" (every tracker URL attached to a torrent).
+
+If the raw RPC call fails for any reason, the system silently falls back to `TrackerHost` so there is no regression.
+
+### 14. Tracker Domain Migration (Python to Go)
+When migrating from the Python version, tracker domains in `groups.json` may not match the Go version's format. For example, Python stored `sync.td-peers.com` while Go's `TrackerHost` returned `td-peers.com`.
+
+A `MigrateGroups` function in `config.go` runs automatically on dashboard load. It compares active Deluge tracker domains against existing `groups.json` keys and copies tags when a Python-style subdomain key (e.g. `sync.td-peers.com`) matches a Go-style base domain (e.g. `td-peers.com`) by suffix. Old keys are preserved so the migration is non-destructive.
+
+With multi-tracker support now active, the Go version extracts the same full subdomain URLs as the Python version, so new tracker entries will match the Python format going forward.
+
+### 15. Dashboard Activity Feed Filter
+The Recent Activity feed on the dashboard now has a "Removals only" toggle switch that filters the feed to show only torrent removal events. Removal entries display enriched detail: tag, state, time metric, and whether data was deleted (color-coded red/green). The toggle preference is saved to `localStorage` and persists across sessions.
+
 ## Known Limitations
-
-### Tracker Reading Mode ("All Trackers" vs "Primary Tracker")
-The `go-libdeluge` library only exposes `TrackerHost` — a single tracker hostname per torrent. The Python version uses raw RPC to fetch the full `trackers` list (all tracker URLs attached to a torrent).
-
-**Impact**: The "Tracker Reading Mode" setting in Settings has no effect in the Go version. Every torrent only shows its primary tracker regardless of the setting. Tag assignment and rule matching still work correctly for the primary tracker.
-
-**Root cause**: The library's `statusKeys` (what fields it requests from Deluge) are hardcoded and unexported. Neither `gdm85/go-libdeluge` nor the `autobrr/go-deluge` fork includes the full tracker list in their `TorrentStatus` struct.
-
-**Fix options**:
-1. Fork `go-libdeluge` and add `"trackers"` to the `statusKeys` map + add a `Trackers` field to the struct (~20 lines of changes)
-2. Use a different approach to fetch tracker data via a separate RPC mechanism
 
 ### Log Rotation
 Python used `RotatingFileHandler` with 10MB max and 5 backups. The Go version writes to a single log file without rotation. For production use, configure `logrotate` on the host or add the `lumberjack` library.
