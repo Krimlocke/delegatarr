@@ -1,0 +1,176 @@
+{{template "base.html" .}}
+{{define "content"}}
+<div class="dash-stats">
+    <div class="dash-stat">
+        <div class="dash-stat-label">Total torrents</div>
+        <div class="dash-stat-value">{{.DashTotalTorrents}}</div>
+        <div class="dash-stat-sub">across {{.DashTrackerCount}} trackers</div>
+    </div>
+    <div class="dash-stat">
+        <div class="dash-stat-label">Removed today</div>
+        <div class="dash-stat-value" style="color: var(--accent);">{{.DashRemovedToday}}</div>
+        <div class="dash-stat-sub">{{.DashRemovedWeek}} this week</div>
+    </div>
+    <div class="dash-stat">
+        <div class="dash-stat-label">Active rules</div>
+        <div class="dash-stat-value">{{.DashActiveRules}}</div>
+        <div class="dash-stat-sub">{{if .DashDisabledRules}}{{.DashDisabledRules}} disabled{{else}}none disabled{{end}}</div>
+    </div>
+    <div class="dash-stat">
+        <div class="dash-stat-label">Engine</div>
+        <div class="dash-stat-value" style="color: var(--success);">{{if .AppSettings.DryRun}}Dry Run{{else}}Live{{end}}</div>
+        <div class="dash-stat-sub">every {{.DashInterval}}m</div>
+    </div>
+</div>
+
+<div class="dash-cols">
+    <div class="dash-left">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Recent activity</h3>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Removals only</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="dashRemovalsToggle" onchange="toggleRemovalsOnly(this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            {{if .DashRecentEvents}}
+            <div class="dash-feed">
+                {{range .DashRecentEvents}}
+                <div class="dash-feed-item" data-removal="{{if .IsRemoval}}true{{else}}false{{end}}">
+                    <div class="dash-feed-dot dash-feed-dot-{{.Color}}"></div>
+                    <div>
+                        <div class="dash-feed-text">{{.Text}}</div>
+                        <div class="dash-feed-detail">{{if .IsRemoval}}{{.Detail}}{{if .TimeAgo}} · {{.TimeAgo}}{{end}}{{else}}{{.Detail}}{{if .TimeAgo}}{{if .Detail}} · {{end}}{{.TimeAgo}}{{end}}{{end}}</div>
+                    </div>
+                </div>
+                {{end}}
+            </div>
+            {{else}}
+            <div style="text-align: center; color: var(--text-muted); padding: 30px;">No recent activity.</div>
+            {{end}}
+        </div>
+
+        {{if .DashRuleStats}}
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Rule performance (7 days)</h3>
+            </div>
+            <div class="dash-rule-stats">
+                {{range .DashRuleStats}}
+                <div class="dash-rule-stat-row">
+                    <div class="dash-rule-stat-header">
+                        <span class="dash-rule-stat-tag">{{.Tag}}</span>
+                        <span class="dash-rule-stat-count">{{.Count}} removed</span>
+                    </div>
+                    <div class="dash-bar-bg">
+                        <div class="dash-bar" style="width: {{.Percent}}%;"></div>
+                    </div>
+                </div>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
+    </div>
+
+    <div class="dash-right">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Engine status</h3>
+            </div>
+            <div class="dash-engine-rows">
+                <div class="dash-engine-row">
+                    <span class="dash-engine-label">Status</span>
+                    {{if .DelugeConnected}}<span class="dash-badge dash-badge-on">Running</span>{{else}}<span class="dash-badge dash-badge-off">Disconnected</span>{{end}}
+                </div>
+                <div class="dash-engine-row">
+                    <span class="dash-engine-label">Dry run</span>
+                    {{if .AppSettings.DryRun}}<span class="dash-badge dash-badge-warn">On</span>{{else}}<span class="dash-badge dash-badge-on">Off</span>{{end}}
+                </div>
+                <div class="dash-engine-row">
+                    <span class="dash-engine-label">Interval</span>
+                    <span class="dash-engine-value">{{.DashInterval}} min</span>
+                </div>
+                <div class="dash-engine-row">
+                    <span class="dash-engine-label">Uptime</span>
+                    <span class="dash-engine-value">{{.DashUptime}}</span>
+                </div>
+            </div>
+        </div>
+
+        {{if .DashTrackerStats}}
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Tracker groups</h3>
+            </div>
+            <div class="dash-tracker-rows">
+                {{range .DashTrackerStats}}
+                <div class="dash-tracker-row">
+                    <span class="dash-tracker-name">{{.Name}}</span>
+                    <div class="dash-bar-bg" style="flex: 1; margin: 0 12px;">
+                        <div class="dash-bar" style="width: {{.Percent}}%;"></div>
+                    </div>
+                    <span class="dash-tracker-count">{{.Count}}</span>
+                </div>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
+
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Connection</h3>
+            </div>
+            <div class="dash-engine-rows">
+                <div class="dash-engine-row">
+                    <span class="dash-engine-label">Deluge</span>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span class="status-dot {{if .DelugeConnected}}status-dot-success{{else}}status-dot-danger{{end}}"></span>
+                        {{if .DelugeConnected}}<span style="color: var(--success); font-size: 13px; font-weight: 500;">Connected</span>{{else}}<span style="color: var(--danger); font-size: 13px; font-weight: 500;">Unreachable</span>{{end}}
+                    </div>
+                </div>
+                <div class="dash-engine-row">
+                    <span class="dash-engine-label">Version</span>
+                    <span style="font-size: 12px; color: var(--text-muted);">v{{.Version}}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Colorize "Data deleted" / "Data kept" in removal detail lines
+document.querySelectorAll('.dash-feed-item[data-removal="true"] .dash-feed-detail').forEach(function(el) {
+    el.innerHTML = el.innerHTML
+        .replace(/Data deleted/g, '<span style="color: var(--danger); font-weight: 500;">Data deleted</span>')
+        .replace(/Data kept/g, '<span style="color: var(--success); font-weight: 500;">Data kept</span>');
+});
+
+// Removals-only toggle with localStorage persistence
+function toggleRemovalsOnly(checked) {
+    localStorage.setItem('dashRemovalsOnly', checked ? 'true' : 'false');
+    var items = document.querySelectorAll('.dash-feed-item');
+    items.forEach(function(item) {
+        if (checked && item.dataset.removal !== 'true') {
+            item.style.display = 'none';
+        } else {
+            item.style.display = '';
+        }
+    });
+}
+
+// Restore saved preference on load
+(function() {
+    var saved = localStorage.getItem('dashRemovalsOnly');
+    if (saved === 'true') {
+        var toggle = document.getElementById('dashRemovalsToggle');
+        if (toggle) {
+            toggle.checked = true;
+            toggleRemovalsOnly(true);
+        }
+    }
+})();
+</script>
+{{end}}

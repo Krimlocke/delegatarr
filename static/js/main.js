@@ -5,7 +5,6 @@ const DelegatarrUI = {
         this.initServiceWorker();
         this.initFlashMessages();
         this.initTimezoneSelect();
-		this.initWizard();
         this.initSearch();
         this.initFilters();
         this.initSorting();
@@ -20,7 +19,7 @@ const DelegatarrUI = {
         this.trackerTable = document.getElementById('trackerTable');
         this.trackerCount = document.getElementById('trackerCount');
         this.rulesSearch = document.getElementById('rulesSearch');
-        this.rulesTable = document.getElementById('rulesTable');
+        this.rulesGrid = document.getElementById('rulesGrid');
         this.rulesCount = document.getElementById('rulesCount');
         this.fileInput = document.getElementById('settingsUpload');
         this.fileNameDisplay = document.getElementById('fileNameDisplay');
@@ -115,8 +114,8 @@ const DelegatarrUI = {
         if (this.trackerSearch && this.trackerTable) {
             this.setupTableSearch(this.trackerSearch, this.trackerTable, this.trackerCount, false);
         }
-        if (this.rulesSearch && this.rulesTable) {
-            this.setupTableSearch(this.rulesSearch, this.rulesTable, this.rulesCount, true);
+        if (this.rulesSearch && this.rulesGrid) {
+            this.initCardSearch(this.rulesSearch, this.rulesGrid, this.rulesCount);
         }
     },
 
@@ -134,7 +133,7 @@ const DelegatarrUI = {
             th.addEventListener('click', (e) => this.handleSortClick(e.currentTarget));
         });
 
-        [this.trackerTable, this.rulesTable].forEach(table => {
+        [this.trackerTable].forEach(table => {
             if (table && table.id) {
                 const savedColText = localStorage.getItem(table.id + '_sortColText');
                 const savedAsc = localStorage.getItem(table.id + '_sortAsc');
@@ -153,47 +152,38 @@ const DelegatarrUI = {
             }
         });
     },
-	initWizard() {
-        const form = document.getElementById('ruleWizardForm');
-        if (!form) return;
+    initCardSearch(searchInput, grid, countElement) {
+        if (!searchInput || !grid) return;
 
-        const steps = form.querySelectorAll('.wizard-step');
-        const progressBar = document.getElementById('wizardBar');
-        const nextBtns = form.querySelectorAll('.btn-next');
-        const prevBtns = form.querySelectorAll('.btn-prev');
+        const cards = grid.querySelectorAll('.rule-card');
+        const totalCount = cards.length;
 
-        const updateWizard = (targetStepNum) => {
-            // Basic validation before moving forward
-            const currentActive = form.querySelector('.wizard-step.active');
-            const inputs = currentActive.querySelectorAll('input[required]');
-            let isValid = true;
-            inputs.forEach(input => {
-                if (!input.value.trim()) {
-                    input.style.borderColor = 'var(--danger)';
-                    isValid = false;
+        if (countElement && totalCount > 0) {
+            countElement.textContent = `Showing ${totalCount} total`;
+        }
+
+        searchInput.addEventListener('input', this.debounce(() => {
+            const filter = searchInput.value.toLowerCase();
+            let visibleCount = 0;
+
+            cards.forEach(card => {
+                const searchText = (card.dataset.search || '').toLowerCase() + ' ' + card.textContent.toLowerCase();
+                if (searchText.includes(filter)) {
+                    card.style.display = '';
+                    visibleCount++;
                 } else {
-                    input.style.borderColor = 'var(--border-color)';
+                    card.style.display = 'none';
                 }
             });
 
-            if (!isValid && targetStepNum > parseInt(currentActive.id.split('-')[1])) return;
-
-            // Hide all, show target
-            steps.forEach(step => step.classList.remove('active'));
-            document.getElementById(`step-${targetStepNum}`).classList.add('active');
-
-            // Update progress bar (3 steps total)
-            const progressObj = { 1: '33%', 2: '66%', 3: '100%' };
-            progressBar.style.width = progressObj[targetStepNum];
-        };
-
-        nextBtns.forEach(btn => btn.addEventListener('click', (e) => {
-            updateWizard(parseInt(e.target.dataset.next));
-        }));
-
-        prevBtns.forEach(btn => btn.addEventListener('click', (e) => {
-            updateWizard(parseInt(e.target.dataset.prev));
-        }));
+            if (countElement) {
+                if (filter === '') {
+                    countElement.textContent = totalCount > 0 ? `Showing ${totalCount} total` : '';
+                } else {
+                    countElement.textContent = `Showing ${visibleCount} of ${totalCount}`;
+                }
+            }
+        }, 250));
     },
 
     debounce(func, wait) {
