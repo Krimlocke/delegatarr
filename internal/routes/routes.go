@@ -154,10 +154,11 @@ type flashMsg struct {
 
 // Dashboard types
 type DashEvent struct {
-	Color   string
-	Text    string
-	Detail  string
-	TimeAgo string
+	Color     string
+	Text      string
+	Detail    string
+	TimeAgo   string
+	IsRemoval bool
 }
 
 type DashRuleStat struct {
@@ -301,7 +302,8 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		// Build recent events (max 8)
 		if len(recentEvents) < 8 {
 			var ev *DashEvent
-			if strings.Contains(lower, "rule matched") && strings.Contains(lower, "removed:") {
+			if (strings.Contains(lower, "rule matched") && strings.Contains(lower, "removed:")) ||
+				(strings.Contains(lower, "[dry run]") && strings.Contains(lower, "would have removed:")) {
 				name := ""
 				if nameStart := strings.Index(line, "Removed: '"); nameStart >= 0 {
 					rest := line[nameStart+10:]
@@ -312,14 +314,66 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
-				tag := ""
-				if tagIdx := strings.Index(line, "(Tag: "); tagIdx >= 0 {
-					rest := line[tagIdx+6:]
-					if commaIdx := strings.Index(rest, ","); commaIdx >= 0 {
-						tag = rest[:commaIdx]
+				if name == "" {
+					if nameStart := strings.Index(line, "removed: '"); nameStart >= 0 {
+						rest := line[nameStart+10:]
+						if nameEnd := strings.Index(rest, "'"); nameEnd >= 0 {
+							name = rest[:nameEnd]
+							if len(name) > 45 {
+								name = name[:42] + "..."
+							}
+						}
 					}
 				}
-				ev = &DashEvent{Color: "accent", Text: name + " removed", Detail: "Tag: " + tag}
+				tag, state, metric, deleteData := "", "", "", ""
+				if parenIdx := strings.Index(line, "(Tag: "); parenIdx >= 0 {
+					inner := line[parenIdx+1:]
+					if closeIdx := strings.Index(inner, ")"); closeIdx >= 0 {
+						inner = inner[:closeIdx]
+					}
+					for _, part := range strings.Split(inner, ",") {
+						part = strings.TrimSpace(part)
+						if strings.HasPrefix(part, "Tag: ") {
+							tag = strings.TrimPrefix(part, "Tag: ")
+						} else if strings.HasPrefix(part, "State: ") {
+							state = strings.TrimPrefix(part, "State: ")
+						} else if strings.HasPrefix(part, "Metric: ") {
+							metric = strings.TrimPrefix(part, "Metric: ")
+							switch metric {
+							case "seeding_time":
+								metric = "Seeding time"
+							case "time_added":
+								metric = "Time since added"
+							case "time_paused":
+								metric = "Time paused"
+							}
+						} else if strings.HasPrefix(part, "Delete Data: ") {
+							if strings.Contains(strings.ToLower(part), "true") {
+								deleteData = "Data deleted"
+							} else {
+								deleteData = "Data kept"
+							}
+						}
+					}
+				}
+
+				prefix := ""
+				if strings.Contains(lower, "[dry run]") {
+					prefix = "[DRY RUN] "
+				}
+
+				detail := "Tag: " + tag
+				if state != "" {
+					detail += " · " + state
+				}
+				if metric != "" {
+					detail += " · " + metric
+				}
+				if deleteData != "" {
+					detail += " · " + deleteData
+				}
+
+				ev = &DashEvent{Color: "accent", Text: prefix + name + " removed", Detail: detail, IsRemoval: true}
 			} else if strings.Contains(lower, "skipped") && strings.Contains(lower, "minimum keep") {
 				ev = &DashEvent{Color: "warning", Text: "Rule skipped — below minimum keep"}
 			} else if strings.Contains(lower, "error") || strings.Contains(lower, "failed") {
