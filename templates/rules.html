@@ -109,7 +109,26 @@
     <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
         <h3 class="card-title" style="margin: 0;">Active Rules</h3>
         <span id="rulesCount" style="font-size: 13px; color: var(--text-muted); font-weight: 500;"></span>
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 12px; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="checkbox" id="bulkSelectAll" style="accent-color: var(--accent);"> Select all
+            </label>
+        </div>
     </div>
+
+    <!-- Bulk actions bar (hidden until selection) -->
+    <form action="/bulk_rules" method="POST" id="bulkForm">
+        {{.CSRFField}}
+        <div id="bulkBar" style="display: none; margin-bottom: 15px; padding: 10px 14px; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); border-radius: 8px; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span id="bulkCount" style="font-size: 13px; font-weight: 600; color: var(--accent);">0 selected</span>
+            <div style="display: flex; gap: 6px; margin-left: auto;">
+                <button type="submit" name="bulk_action" value="enable" class="btn-ghost btn-ghost-edit" style="color: var(--success); border-color: var(--success);">Enable</button>
+                <button type="submit" name="bulk_action" value="disable" class="btn-ghost btn-ghost-edit" style="color: var(--warning); border-color: var(--warning);">Disable</button>
+                <button type="submit" name="bulk_action" value="delete" class="btn-ghost btn-ghost-delete" onclick="return confirm('Delete all selected rules? This cannot be undone.')">Delete</button>
+            </div>
+        </div>
+    </form>
+
     <input type="text" id="rulesSearch" class="table-search" aria-label="Search rules" placeholder="🔍 Search rules by tag, label, or state...">
     
     <div id="rulesGrid" class="rules-grid">
@@ -118,6 +137,7 @@
         <div class="rule-card{{if not $rule.IsEnabled}} rule-card-disabled{{end}}" data-search="{{$rule.GroupID}} {{$rule.Label}} {{$rule.TargetState}} {{$rule.TimeMetric}} {{$rule.SortOrder}}">
             <div class="rule-card-header">
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" class="bulk-check" data-index="{{$i}}" style="accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer;">
                     <div class="rule-card-tag">{{$rule.GroupID}}</div>
                     {{if not $rule.IsEnabled}}<span style="font-size: 11px; color: var(--text-muted); font-weight: 500; background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 4px;">Disabled</span>{{end}}
                 </div>
@@ -220,6 +240,51 @@ function cancelEditMode() {
     document.getElementById('formTitle').textContent = 'Create New Rule';
     document.getElementById('formSubmitBtn').textContent = '+ Save Rule';
     document.getElementById('cancelEdit').style.display = 'none';
+}
+
+// --- Bulk selection ---
+function updateBulkBar() {
+    const checked = document.querySelectorAll('.bulk-check:checked');
+    const bar = document.getElementById('bulkBar');
+    const countEl = document.getElementById('bulkCount');
+    const bulkForm = document.getElementById('bulkForm');
+
+    // Sync hidden inputs for selected indices
+    bulkForm.querySelectorAll('input[name="rule_indices"]').forEach(el => el.remove());
+    checked.forEach(cb => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'rule_indices';
+        input.value = cb.dataset.index;
+        bulkForm.appendChild(input);
+    });
+
+    if (checked.length > 0) {
+        bar.style.display = 'flex';
+        countEl.textContent = checked.length + ' selected';
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+document.querySelectorAll('.bulk-check').forEach(cb => {
+    cb.addEventListener('change', () => {
+        updateBulkBar();
+        // Update select-all state
+        const all = document.querySelectorAll('.bulk-check');
+        const allChecked = document.querySelectorAll('.bulk-check:checked');
+        document.getElementById('bulkSelectAll').checked = all.length === allChecked.length;
+        document.getElementById('bulkSelectAll').indeterminate = allChecked.length > 0 && allChecked.length < all.length;
+    });
+});
+
+const selectAllCb = document.getElementById('bulkSelectAll');
+if (selectAllCb) {
+    selectAllCb.addEventListener('change', () => {
+        const checks = document.querySelectorAll('.bulk-check');
+        checks.forEach(cb => { cb.checked = selectAllCb.checked; });
+        updateBulkBar();
+    });
 }
 </script>
 {{end}}

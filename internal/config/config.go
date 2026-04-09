@@ -43,6 +43,12 @@ type Settings struct {
 	Timezone         string `json:"timezone"`
 	TrackerMode      string `json:"tracker_mode"`
 	DryRun           bool   `json:"dry_run"`
+
+	// Webhook notifications
+	WebhookURL     string `json:"webhook_url,omitempty"`
+	WebhookType    string `json:"webhook_type,omitempty"`    // "discord", "slack", "generic"
+	NotifyRemovals bool   `json:"notify_removals,omitempty"` // fire on torrent removal
+	NotifyUntagged bool   `json:"notify_untagged,omitempty"` // fire when new untagged tracker found
 }
 
 // DefaultSettings returns the factory-default settings.

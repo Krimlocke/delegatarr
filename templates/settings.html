@@ -54,6 +54,62 @@
 
     <div style="border-top: 1px solid var(--border-color); margin: 16px 0;"></div>
 
+    <!-- Webhook Notifications -->
+    <form action="/save_notifications" method="POST">
+        {{.CSRFField}}
+        <div style="font-size: 15px; font-weight: 600; margin-bottom: 14px;">Webhook Notifications</div>
+
+        <div class="settings-row">
+            <div class="settings-row-info">
+                <div class="settings-row-title">Webhook type</div>
+                <div class="settings-row-hint">Choose your notification platform</div>
+            </div>
+            <select name="webhook_type" style="width: 180px;">
+                <option value=""{{if eq .AppSettings.WebhookType ""}} selected{{end}}>Disabled</option>
+                <option value="discord"{{if eq .AppSettings.WebhookType "discord"}} selected{{end}}>Discord</option>
+                <option value="slack"{{if eq .AppSettings.WebhookType "slack"}} selected{{end}}>Slack</option>
+                <option value="generic"{{if eq .AppSettings.WebhookType "generic"}} selected{{end}}>Generic JSON</option>
+            </select>
+        </div>
+
+        <div class="settings-row">
+            <div class="settings-row-info">
+                <div class="settings-row-title">Webhook URL</div>
+                <div class="settings-row-hint">The full webhook endpoint URL</div>
+            </div>
+            <input type="url" name="webhook_url" value="{{.AppSettings.WebhookURL}}" placeholder="https://..." style="width: 340px;">
+        </div>
+
+        <div class="settings-row">
+            <div class="settings-row-info">
+                <div class="settings-row-title">Notify on removal</div>
+                <div class="settings-row-hint">Send notification when torrents are removed</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" name="notify_removals" value="yes" {{if .AppSettings.NotifyRemovals}}checked{{end}}>
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+
+        <div class="settings-row" style="border-bottom: none;">
+            <div class="settings-row-info">
+                <div class="settings-row-title">Notify on untagged tracker</div>
+                <div class="settings-row-hint">Send notification when new untagged trackers are found</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" name="notify_untagged" value="yes" {{if .AppSettings.NotifyUntagged}}checked{{end}}>
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 14px;">
+            <button type="button" class="btn-ghost btn-ghost-edit" onclick="testWebhook()">Test Webhook</button>
+            <button type="submit" class="btn btn-primary">Save Notifications</button>
+        </div>
+    </form>
+
+    <div style="border-top: 1px solid var(--border-color); margin: 16px 0;"></div>
+
     <div class="settings-row">
         <div class="settings-row-info">
             <div class="settings-row-title">Export configuration</div>
@@ -106,4 +162,24 @@
         </div>
     </div>
 </div>
+<script>
+function testWebhook() {
+    const form = document.querySelector('form[action="/save_notifications"]');
+    const url = form.querySelector('[name="webhook_url"]').value;
+    const type = form.querySelector('[name="webhook_type"]').value;
+    if (!url || !type) {
+        alert('Please set a webhook type and URL first.');
+        return;
+    }
+    const csrfToken = form.querySelector('input[name="gorilla.csrf.Token"]').value;
+    const fd = new FormData();
+    fd.append('webhook_url', url);
+    fd.append('webhook_type', type);
+    fd.append('gorilla.csrf.Token', csrfToken);
+    fetch('/test_webhook', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => { alert(data.ok ? 'Test notification sent!' : 'Failed: ' + (data.error || 'unknown error')); })
+        .catch(err => { alert('Request failed: ' + err); });
+}
+</script>
 {{end}}
