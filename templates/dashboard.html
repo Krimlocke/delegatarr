@@ -28,15 +28,22 @@
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Recent activity</h3>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Removals only</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="dashRemovalsToggle" onchange="toggleRemovalsOnly(this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
             </div>
             {{if .DashRecentEvents}}
             <div class="dash-feed">
                 {{range .DashRecentEvents}}
-                <div class="dash-feed-item">
+                <div class="dash-feed-item" data-removal="{{if .IsRemoval}}true{{else}}false{{end}}">
                     <div class="dash-feed-dot dash-feed-dot-{{.Color}}"></div>
-                    <div class="dash-feed-content">
+                    <div>
                         <div class="dash-feed-text">{{.Text}}</div>
-                        <div class="dash-feed-detail">{{.Detail}}{{if .TimeAgo}}{{if .Detail}} · {{end}}{{.TimeAgo}}{{end}}</div>
+                        <div class="dash-feed-detail">{{if .IsRemoval}}{{.Detail}}{{if .TimeAgo}} · {{.TimeAgo}}{{end}}{{else}}{{.Detail}}{{if .TimeAgo}}{{if .Detail}} · {{end}}{{.TimeAgo}}{{end}}{{end}}</div>
                     </div>
                 </div>
                 {{end}}
@@ -132,4 +139,38 @@
         </div>
     </div>
 </div>
+
+<script>
+// Colorize "Data deleted" / "Data kept" in removal detail lines
+document.querySelectorAll('.dash-feed-item[data-removal="true"] .dash-feed-detail').forEach(function(el) {
+    el.innerHTML = el.innerHTML
+        .replace(/Data deleted/g, '<span style="color: var(--danger); font-weight: 500;">Data deleted</span>')
+        .replace(/Data kept/g, '<span style="color: var(--success); font-weight: 500;">Data kept</span>');
+});
+
+// Removals-only toggle with localStorage persistence
+function toggleRemovalsOnly(checked) {
+    localStorage.setItem('dashRemovalsOnly', checked ? 'true' : 'false');
+    var items = document.querySelectorAll('.dash-feed-item');
+    items.forEach(function(item) {
+        if (checked && item.dataset.removal !== 'true') {
+            item.style.display = 'none';
+        } else {
+            item.style.display = '';
+        }
+    });
+}
+
+// Restore saved preference on load
+(function() {
+    var saved = localStorage.getItem('dashRemovalsOnly');
+    if (saved === 'true') {
+        var toggle = document.getElementById('dashRemovalsToggle');
+        if (toggle) {
+            toggle.checked = true;
+            toggleRemovalsOnly(true);
+        }
+    }
+})();
+</script>
 {{end}}
