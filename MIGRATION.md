@@ -9,6 +9,7 @@
 | `delegatarr/deluge.py`        | `internal/deluge/deluge.go` + `types.go` |
 | `delegatarr/engine.py`        | `internal/engine/engine.go` + `helpers.go` |
 | `delegatarr/routes.py`        | `internal/routes/routes.go`             |
+| *(new)*                       | `internal/notify/notify.go`             |
 | Flask Blueprint               | `gorilla/mux` Router                    |
 | Jinja2 templates              | Go `html/template`                      |
 | APScheduler                   | `go-co-op/gocron`                       |
@@ -69,6 +70,26 @@ The Dockerfile uses a multi-stage build with dependency layer caching:
 The original `minTorrents` guard in `engine.go` used `minTorrents < len(matching)` to decide whether to protect torrents from removal. This was inverted — when the matching count was equal to or less than the minimum (e.g. 15 matching with a min keep of 15), the condition was false and all matching torrents became removal candidates instead of being protected.
 
 The fix ensures that when the number of matching torrents is at or below the `minTorrents` threshold, the rule is skipped entirely. Only when there are strictly more matching torrents than the minimum does the engine slice off the protected torrents and evaluate the rest for removal.
+
+### 10. Duplicate Rule Detection
+When creating or editing a rule, the system checks for existing rules with the same tag + label + state combination (case-insensitive). If a match is found, the rule still saves but a warning flash identifies the conflicting rule by number. The `findDuplicateRule` helper in `routes.go` accepts an `excludeIdx` parameter so edits don't flag themselves.
+
+### 11. Bulk Rule Actions
+Each rule card now has a selection checkbox. A "Select all" toggle and a floating action bar appear when rules are selected, allowing bulk Enable, Disable, or Delete. The `bulkRulesHandler` in `routes.go` processes deletes in reverse index order to keep indices stable. Bulk delete requires a browser `confirm()` dialog.
+
+### 12. Webhook Notifications
+New `internal/notify` package handles outbound webhooks for three platforms:
+- **Discord**: Rich embeds with color coding and timestamps
+- **Slack**: Block kit with mrkdwn formatting
+- **Generic JSON**: Simple `{title, body, timestamp, source}` payload
+
+Two notification triggers are integrated into the engine:
+- **Torrent removal**: Fires after the engine removes torrents (or identifies them in dry run mode). Batches up to 10 entries per message.
+- **Untagged tracker detected**: Fires when the engine finds tracker domains with no tag assignment. Uses a fingerprint cache (`lastNotifiedUntagged`) so it only notifies when the set of untagged domains changes between runs.
+
+Settings page has a dedicated "Webhook Notifications" section with type selector, URL input, per-event toggles, and a "Test Webhook" button that sends a sample notification without modifying saved config.
+
+Notification settings are stored in `settings.json` alongside existing settings (`webhook_url`, `webhook_type`, `notify_removals`, `notify_untagged`) and are fully included in config export/import.
 
 ## Known Limitations
 
