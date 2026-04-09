@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -154,4 +155,47 @@ func ApplyTimezone(tz string) {
 	} else {
 		log.Printf("System Error: Invalid timezone %q: %v", tz, err)
 	}
+}
+
+// MigrateGroups checks for Python-style tracker domains (e.g. "sync.td-peers.com")
+// that match Go-style domains (e.g. "td-peers.com") by suffix, and migrates tags
+// to the new key format. This handles the transition from the Python version which
+// used full tracker URLs to extract domains, vs the Go version which uses the
+// go-libdeluge TrackerHost field (a shorter base domain).
+//
+// activeDomains should be the set of tracker domains currently reported by Deluge.
+// Returns true if any migrations were performed.
+func MigrateGroups(activeDomains []string) bool {
+	groups := LoadGroups()
+	if len(groups) == 0 || len(activeDomains) == 0 {
+		return false
+	}
+
+	migrated := false
+	for _, domain := range activeDomains {
+		if _, exists := groups[domain]; exists {
+			continue // already tagged under the Go-style domain
+		}
+		// Check if any existing key is a longer version of this domain
+		// e.g. "sync.td-peers.com" ends with ".td-peers.com" or equals "td-peers.com"
+		for oldKey, tag := range groups {
+			if oldKey == domain {
+				continue
+			}
+			if strings.HasSuffix(oldKey, "."+domain) || strings.HasSuffix(domain, "."+oldKey) {
+				groups[domain] = tag
+				log.Printf("System: Migrated tracker tag '%s' from '%s' to '%s'", tag, oldKey, domain)
+				migrated = true
+				break
+			}
+		}
+	}
+
+	if migrated {
+		if err := SaveJSON(GroupsFile, groups); err != nil {
+			log.Printf("System Error: Failed to save migrated groups: %v", err)
+			return false
+		}
+	}
+	return migrated
 }
