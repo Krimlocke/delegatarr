@@ -9,7 +9,8 @@ RUN go mod download 2>/dev/null || true
 
 COPY . .
 RUN go mod tidy
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /delegatarr ./cmd/delegatarr
+RUN APP_VERSION="$(date -u '+%Y.%m.%d.%H%M').go" && \
+    CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/krimlocke/delegatarr/internal/config.AppVersion=${APP_VERSION}" -o /delegatarr ./cmd/delegatarr
 
 # --- Runtime Stage ---
 FROM alpine:3.19
