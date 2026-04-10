@@ -120,7 +120,12 @@ Three evaluation modes in the engine:
 
 The rules form adds a "Tracker Status Contains" text input in the Removal Conditions section. Time threshold is no longer required when tracker status is set. Rule cards display the tracker status pattern highlighted in red when configured.
 
-### 16. Dashboard Activity Feed Filter
+### 16. Auto-Versioning via Build-Time Injection
+`AppVersion` in `config.go` is now a `var` instead of a `const`, injected at build time via Go's `-ldflags -X` mechanism. The format is `yyyy.mm.dd.HHMM.go` where `HHMM` is the UTC hour and minute of the build, acting as a serial number.
+
+The Dockerfile generates the version string with `date -u '+%Y.%m.%d.%H%M'` and passes it to `go build`. Local builds without `-ldflags` default to `"dev"`. No manual version bumps are needed — every Docker build gets a unique, chronologically sortable version.
+
+### 17. Dashboard Activity Feed Filter
 The Recent Activity feed on the dashboard now has a "Removals only" toggle switch that filters the feed to show only torrent removal events. Removal entries display enriched detail: tag, state, time metric, and whether data was deleted (color-coded red/green). The toggle preference is saved to `localStorage` and persists across sessions.
 
 ## Known Limitations

@@ -10,7 +10,9 @@ import (
 	"time"
 )
 
-const AppVersion = "2026.04.09.go"
+// AppVersion is injected at build time via -ldflags. Format: yyyy.mm.dd.HHMM.go
+// Falls back to "dev" for untagged local builds.
+var AppVersion = "dev"
 
 var (
 	ConfigDir     = "/config"
