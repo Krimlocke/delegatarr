@@ -1,28 +1,30 @@
-# Use a lightweight Python base image
-FROM python:3.11-slim
+# --- Build Stage ---
+FROM golang:1.22-alpine AS builder
 
-# Install tzdata so the OS can handle the timezone settings from the app
-RUN apt-get update && apt-get install -y tzdata && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
 
-# Set the working directory inside the container
+# Cache dependency downloads in their own layer
+COPY go.mod go.sum* ./
+RUN go mod download 2>/dev/null || true
+
+COPY . .
+RUN go mod tidy
+RUN APP_VERSION="$(date -u '+%Y.%m.%d.%H%M').go" && \
+    CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/krimlocke/delegatarr/internal/config.AppVersion=${APP_VERSION}" -o /delegatarr ./cmd/delegatarr
+
+# --- Runtime Stage ---
+FROM alpine:3.19
+
+RUN apk add --no-cache tzdata ca-certificates
+
 WORKDIR /app
 
-# Copy dependency list and install them
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=builder /delegatarr .
+COPY --from=builder /src/templates/ templates/
+COPY --from=builder /src/static/ static/
+COPY --from=builder /src/logo.png .
 
-# Copy the application package and folders
-COPY app.py .
-COPY logo.png . 
-COPY delegatarr/ delegatarr/
-COPY static/ static/
-COPY templates/ templates/
-
-# Explicitly declare the /config volume for persistent storage
 VOLUME /config
-
-# Expose the port that Waitress is serving on
 EXPOSE 5555
 
-# Run the application with unbuffered output (-u) so logs appear instantly in Docker
-CMD ["python", "-u", "app.py"]
+CMD ["/app/delegatarr"]
