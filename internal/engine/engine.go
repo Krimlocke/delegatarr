@@ -52,7 +52,7 @@ func GetDashboardData() (TrackerSummary, []string) {
 	labelsSet := map[string]bool{}
 
 	for hash, ts := range torrents {
-		t := deluge.FromStatus(ts, labelMap[hash], fullTrackers[hash])
+		t := deluge.FromStatus(ts, labelMap[hash], deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
 
 		if t.Label != "" {
 			labelsSet[t.Label] = true
@@ -91,12 +91,13 @@ func GetDashboardData() (TrackerSummary, []string) {
 
 // torrentCandidate holds a torrent being evaluated for removal.
 type torrentCandidate struct {
-	ID           string
-	Name         string
-	SeedingHours float64
-	TimeAdded    float64
-	TriggerValue float64
-	Ratio        float64
+	ID            string
+	Name          string
+	SeedingHours  float64
+	TimeAdded     float64
+	TriggerValue  float64
+	Ratio         float64
+	TrackerStatus string
 }
 
 // ProcessTorrents is the background engine that evaluates torrents against removal rules.
@@ -141,11 +142,14 @@ func ProcessTorrents(runType string) {
 	// Fetch full tracker URLs via raw RPC (nil if unavailable — falls back to TrackerHost)
 	fullTrackers := deluge.FetchTrackerURLs()
 
+	// Fetch tracker statuses via raw RPC (nil if unavailable)
+	trackerStatuses := deluge.FetchTrackerStatuses()
+
 	// Detect untagged trackers and notify
 	if settings.NotifyUntagged && settings.WebhookURL != "" {
 		untaggedSet := map[string]bool{}
 		for hash, ts := range torrents {
-			t := deluge.FromStatus(ts, "", fullTrackers[hash])
+			t := deluge.FromStatus(ts, "", deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
 			trackerURLs := extractTrackerURLs(t)
 			for _, rawURL := range trackerURLs {
 				domain := extractDomain(rawURL)
@@ -211,7 +215,10 @@ func ProcessTorrents(runType string) {
 		var matching []torrentCandidate
 
 		for hash, ts := range torrents {
-			t := deluge.FromStatus(ts, labelMap[hash], fullTrackers[hash])
+			t := deluge.FromStatus(ts, labelMap[hash], deluge.FromStatusOpts{
+				TrackerURLs:   fullTrackers[hash],
+				TrackerStatus: trackerStatuses[hash],
+			})
 
 			name := t.Name
 			label := t.Label
@@ -261,12 +268,13 @@ func ProcessTorrents(runType string) {
 				}
 
 				matching = append(matching, torrentCandidate{
-					ID:           hash,
-					Name:         name,
-					SeedingHours: seedingHours,
-					TimeAdded:    timeAdded,
-					TriggerValue: triggerValue,
-					Ratio:        ratio,
+					ID:            hash,
+					Name:          name,
+					SeedingHours:  seedingHours,
+					TimeAdded:     timeAdded,
+					TriggerValue:  triggerValue,
+					Ratio:         ratio,
+					TrackerStatus: t.TrackerStatus,
 				})
 			}
 		}
@@ -299,20 +307,52 @@ func ProcessTorrents(runType string) {
 			candidates = matching[minTorrents:]
 		}
 
+		ruleTrackerStatus := strings.ToLower(strings.TrimSpace(rule.TrackerStatus))
+
 		for _, t := range candidates {
 			if seenIDs[t.ID] {
 				continue
 			}
 
-			timeCondMet := t.TriggerValue >= ruleMaxHours
+			// Tracker status condition: match if torrent's tracker status contains the rule's pattern
+			trackerStatusMet := false
+			if ruleTrackerStatus != "" {
+				trackerStatusMet = strings.Contains(strings.ToLower(t.TrackerStatus), ruleTrackerStatus)
+			}
 
-			meetsCriteria := timeCondMet
-			if rule.SeedRatio != nil {
-				ratioCondMet := t.Ratio >= *rule.SeedRatio
+			// Time/ratio conditions (only evaluated when threshold is configured)
+			timeCondMet := ruleMaxHours > 0 && t.TriggerValue >= ruleMaxHours
+
+			meetsCriteria := false
+			if ruleTrackerStatus != "" && ruleMaxHours == 0 && rule.SeedRatio == nil {
+				// Tracker status is the sole condition
+				meetsCriteria = trackerStatusMet
+			} else if ruleTrackerStatus != "" {
+				// Tracker status combined with time/ratio via the logic operator
+				timeRatioCond := timeCondMet
+				if rule.SeedRatio != nil {
+					ratioCondMet := t.Ratio >= *rule.SeedRatio
+					if rule.LogicOperator == "AND" {
+						timeRatioCond = timeCondMet && ratioCondMet
+					} else {
+						timeRatioCond = timeCondMet || ratioCondMet
+					}
+				}
 				if rule.LogicOperator == "AND" {
-					meetsCriteria = timeCondMet && ratioCondMet
+					meetsCriteria = trackerStatusMet && timeRatioCond
 				} else {
-					meetsCriteria = timeCondMet || ratioCondMet
+					meetsCriteria = trackerStatusMet || timeRatioCond
+				}
+			} else {
+				// Original logic: time/ratio only
+				meetsCriteria = timeCondMet
+				if rule.SeedRatio != nil {
+					ratioCondMet := t.Ratio >= *rule.SeedRatio
+					if rule.LogicOperator == "AND" {
+						meetsCriteria = timeCondMet && ratioCondMet
+					} else {
+						meetsCriteria = timeCondMet || ratioCondMet
+					}
 				}
 			}
 
