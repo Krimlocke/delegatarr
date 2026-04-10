@@ -1,7 +1,7 @@
 name: Build and Publish Docker Image
 on:
   push:
-    branches: [main, alpha, go-migration]
+    branches: [main, alpha, beta, go-migration]
     tags: ['v*']
   workflow_dispatch:
 env:
