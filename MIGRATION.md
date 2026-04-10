@@ -125,8 +125,10 @@ The rules form adds a "Tracker Status Contains" text input in the Removal Condit
 
 The Dockerfile generates the version string with `date -u '+%Y.%m.%d.%H%M'` and passes it to `go build`. Local builds without `-ldflags` default to `"dev"`. No manual version bumps are needed — every Docker build gets a unique, chronologically sortable version.
 
-### 17. Dashboard Activity Feed Filter
-The Recent Activity feed on the dashboard now has a "Removals only" toggle switch that filters the feed to show only torrent removal events. Removal entries display enriched detail: tag, state, time metric, and whether data was deleted (color-coded red/green). The toggle preference is saved to `localStorage` and persists across sessions.
+### 17. Dashboard Activity Feed
+The Recent Activity feed shows the last 8 events with deduplication — consecutive log entries with identical text and timestamp are collapsed into a single entry, preventing the duplicate rows that occurred when Docker captured both stdout and the log file. Removal entries display enriched detail: tag, state, time metric, and whether data was deleted (color-coded red/green).
+
+A separate "Last N Removed" card appears below the activity feed when removals exist, showing up to 10 of the most recent torrent removals with full detail. This replaces the previous "Removals only" toggle filter.
 
 ## Known Limitations
 
