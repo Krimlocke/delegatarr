@@ -132,19 +132,20 @@ type pageData struct {
 	LogContent     string
 
 	// Dashboard data
-	DashTotalTorrents int
-	DashTrackerCount  int
-	DashRemovedToday  int
-	DashRemovedWeek   int
-	DashActiveRules   int
-	DashDisabledRules int
-	DashRecentEvents  []DashEvent
-	DashRuleStats     []DashRuleStat
-	DashTrackerStats  []DashTrackerStat
-	DashUptime        string
-	DashLastRun       string
-	DashNextRun       string
-	DashInterval      int
+	DashTotalTorrents  int
+	DashTrackerCount   int
+	DashRemovedToday   int
+	DashRemovedWeek    int
+	DashActiveRules    int
+	DashDisabledRules  int
+	DashRecentEvents   []DashEvent
+	DashRecentRemovals []DashEvent
+	DashRuleStats      []DashRuleStat
+	DashTrackerStats   []DashTrackerStat
+	DashUptime         string
+	DashLastRun        string
+	DashNextRun        string
+	DashInterval       int
 }
 
 type flashMsg struct {
@@ -263,6 +264,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	weekAgo := now.AddDate(0, 0, -7)
 
 	var recentEvents []DashEvent
+	var recentRemovals []DashEvent
 	ruleRemovalCounts := map[string]int{}
 	removedToday, removedWeek := 0, 0
 
@@ -302,13 +304,23 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Build recent events (max 8)
-		if len(recentEvents) < 8 {
-			var ev *DashEvent
-			if (strings.Contains(lower, "rule matched") && strings.Contains(lower, "removed:")) ||
-				(strings.Contains(lower, "[dry run]") && strings.Contains(lower, "would have removed:")) {
-				name := ""
-				if nameStart := strings.Index(line, "Removed: '"); nameStart >= 0 {
+		// Build recent events (max 8) and recent removals (max 10)
+		var ev *DashEvent
+		isRemoval := false
+		if (strings.Contains(lower, "rule matched") && strings.Contains(lower, "removed:")) ||
+			(strings.Contains(lower, "[dry run]") && strings.Contains(lower, "would have removed:")) {
+			name := ""
+			if nameStart := strings.Index(line, "Removed: '"); nameStart >= 0 {
+				rest := line[nameStart+10:]
+				if nameEnd := strings.Index(rest, "'"); nameEnd >= 0 {
+					name = rest[:nameEnd]
+					if len(name) > 45 {
+						name = name[:42] + "..."
+					}
+				}
+			}
+			if name == "" {
+				if nameStart := strings.Index(line, "removed: '"); nameStart >= 0 {
 					rest := line[nameStart+10:]
 					if nameEnd := strings.Index(rest, "'"); nameEnd >= 0 {
 						name = rest[:nameEnd]
@@ -317,67 +329,59 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
-				if name == "" {
-					if nameStart := strings.Index(line, "removed: '"); nameStart >= 0 {
-						rest := line[nameStart+10:]
-						if nameEnd := strings.Index(rest, "'"); nameEnd >= 0 {
-							name = rest[:nameEnd]
-							if len(name) > 45 {
-								name = name[:42] + "..."
-							}
+			}
+			tag, state, metric, deleteData := "", "", "", ""
+			if parenIdx := strings.Index(line, "(Tag: "); parenIdx >= 0 {
+				inner := line[parenIdx+1:]
+				if closeIdx := strings.Index(inner, ")"); closeIdx >= 0 {
+					inner = inner[:closeIdx]
+				}
+				for _, part := range strings.Split(inner, ",") {
+					part = strings.TrimSpace(part)
+					if strings.HasPrefix(part, "Tag: ") {
+						tag = strings.TrimPrefix(part, "Tag: ")
+					} else if strings.HasPrefix(part, "State: ") {
+						state = strings.TrimPrefix(part, "State: ")
+					} else if strings.HasPrefix(part, "Metric: ") {
+						metric = strings.TrimPrefix(part, "Metric: ")
+						switch metric {
+						case "seeding_time":
+							metric = "Seeding time"
+						case "time_added":
+							metric = "Time since added"
+						case "time_paused":
+							metric = "Time paused"
+						}
+					} else if strings.HasPrefix(part, "Delete Data: ") {
+						if strings.Contains(strings.ToLower(part), "true") {
+							deleteData = "Data deleted"
+						} else {
+							deleteData = "Data kept"
 						}
 					}
 				}
-				tag, state, metric, deleteData := "", "", "", ""
-				if parenIdx := strings.Index(line, "(Tag: "); parenIdx >= 0 {
-					inner := line[parenIdx+1:]
-					if closeIdx := strings.Index(inner, ")"); closeIdx >= 0 {
-						inner = inner[:closeIdx]
-					}
-					for _, part := range strings.Split(inner, ",") {
-						part = strings.TrimSpace(part)
-						if strings.HasPrefix(part, "Tag: ") {
-							tag = strings.TrimPrefix(part, "Tag: ")
-						} else if strings.HasPrefix(part, "State: ") {
-							state = strings.TrimPrefix(part, "State: ")
-						} else if strings.HasPrefix(part, "Metric: ") {
-							metric = strings.TrimPrefix(part, "Metric: ")
-							switch metric {
-							case "seeding_time":
-								metric = "Seeding time"
-							case "time_added":
-								metric = "Time since added"
-							case "time_paused":
-								metric = "Time paused"
-							}
-						} else if strings.HasPrefix(part, "Delete Data: ") {
-							if strings.Contains(strings.ToLower(part), "true") {
-								deleteData = "Data deleted"
-							} else {
-								deleteData = "Data kept"
-							}
-						}
-					}
-				}
+			}
 
-				prefix := ""
-				if strings.Contains(lower, "[dry run]") {
-					prefix = "[DRY RUN] "
-				}
+			prefix := ""
+			if strings.Contains(lower, "[dry run]") {
+				prefix = "[DRY RUN] "
+			}
 
-				detail := "Tag: " + tag
-				if state != "" {
-					detail += " · " + state
-				}
-				if metric != "" {
-					detail += " · " + metric
-				}
-				if deleteData != "" {
-					detail += " · " + deleteData
-				}
+			detail := "Tag: " + tag
+			if state != "" {
+				detail += " · " + state
+			}
+			if metric != "" {
+				detail += " · " + metric
+			}
+			if deleteData != "" {
+				detail += " · " + deleteData
+			}
 
-				ev = &DashEvent{Color: "accent", Text: prefix + name + " removed", Detail: detail, IsRemoval: true}
-			} else if strings.Contains(lower, "skipped") && strings.Contains(lower, "minimum keep") {
+			ev = &DashEvent{Color: "accent", Text: prefix + name + " removed", Detail: detail, IsRemoval: true}
+			isRemoval = true
+		} else if len(recentEvents) < 8 {
+			if strings.Contains(lower, "skipped") && strings.Contains(lower, "minimum keep") {
 				ev = &DashEvent{Color: "warning", Text: "Rule skipped — below minimum keep"}
 			} else if strings.Contains(lower, "error") || strings.Contains(lower, "failed") {
 				msg := line
@@ -395,10 +399,27 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 			} else if strings.Contains(lower, "deluge connection established") {
 				ev = &DashEvent{Color: "success", Text: "Deluge connection established", Detail: "System"}
 			}
+		}
 
-			if ev != nil {
-				ev.TimeAgo = formatTimeAgo(lineTime, now)
+		if ev != nil {
+			ev.TimeAgo = formatTimeAgo(lineTime, now)
+
+			// Deduplicate: skip if the previous event has the same text and timestamp
+			isDupe := false
+			if len(recentEvents) > 0 {
+				prev := recentEvents[len(recentEvents)-1]
+				if prev.Text == ev.Text && prev.TimeAgo == ev.TimeAgo {
+					isDupe = true
+				}
+			}
+
+			if !isDupe && len(recentEvents) < 8 {
 				recentEvents = append(recentEvents, *ev)
+			}
+
+			// Collect removals separately for the "Last 10 Removed" card
+			if isRemoval && len(recentRemovals) < 10 {
+				recentRemovals = append(recentRemovals, *ev)
 			}
 		}
 	}
@@ -455,8 +476,9 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		DashRemovedWeek:   removedWeek,
 		DashActiveRules:   activeRules,
 		DashDisabledRules: disabledRules,
-		DashRecentEvents:  recentEvents,
-		DashRuleStats:     ruleStats,
+		DashRecentEvents:   recentEvents,
+		DashRecentRemovals: recentRemovals,
+		DashRuleStats:      ruleStats,
 		DashTrackerStats:  trackerStats,
 		DashUptime:        uptime,
 		DashInterval:      interval,
