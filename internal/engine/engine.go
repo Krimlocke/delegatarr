@@ -144,6 +144,9 @@ func ProcessTorrents(runType string) {
 
 	// Fetch tracker statuses via raw RPC (nil if unavailable)
 	trackerStatuses := deluge.FetchTrackerStatuses()
+	if trackerStatuses == nil {
+		log.Printf("%s Engine Run: Tracker status fetch returned nil (RPC may have failed)", runType)
+	}
 
 	// Detect untagged trackers and notify
 	if settings.NotifyUntagged && settings.WebhookURL != "" {
@@ -280,6 +283,10 @@ func ProcessTorrents(runType string) {
 		}
 
 		if len(matching) == 0 {
+			if rule.TrackerStatus != "" {
+				log.Printf("%s Engine Run: Rule '%s' (tracker status: %q) — no torrents matched group+label filter",
+					runType, targetGroup, rule.TrackerStatus)
+			}
 			continue
 		}
 
@@ -309,6 +316,11 @@ func ProcessTorrents(runType string) {
 
 		ruleTrackerStatus := strings.ToLower(strings.TrimSpace(rule.TrackerStatus))
 
+		if ruleTrackerStatus != "" {
+			log.Printf("%s Engine Run: Rule '%s' has tracker status filter: %q, evaluating %d candidate(s)",
+				runType, targetGroup, ruleTrackerStatus, len(candidates))
+		}
+
 		for _, t := range candidates {
 			if seenIDs[t.ID] {
 				continue
@@ -318,6 +330,10 @@ func ProcessTorrents(runType string) {
 			trackerStatusMet := false
 			if ruleTrackerStatus != "" {
 				trackerStatusMet = strings.Contains(strings.ToLower(t.TrackerStatus), ruleTrackerStatus)
+				if !trackerStatusMet {
+					log.Printf("%s Engine Run: Torrent '%s' tracker status %q does not match filter %q",
+						runType, t.Name, t.TrackerStatus, ruleTrackerStatus)
+				}
 			}
 
 			// Time/ratio conditions (only evaluated when threshold is configured)

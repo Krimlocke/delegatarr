@@ -388,11 +388,17 @@ func rawGetTorrentsTrackerStatus(rc *rawConn) (map[string]string, error) {
 				continue
 			}
 
-			if statusBytes, ok := ikvValues[1].([]byte); ok {
-				result[hash] = string(statusBytes)
+			switch v := ikvValues[1].(type) {
+			case []byte:
+				result[hash] = string(v)
+			case string:
+				result[hash] = v
+			default:
+				log.Printf("Tracker Status RPC: unexpected value type %T for hash %s", ikvValues[1], hash)
 			}
 		}
 	}
 
+	log.Printf("Tracker Status RPC: fetched status for %d torrent(s)", len(result))
 	return result, nil
 }
