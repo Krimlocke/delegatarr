@@ -75,8 +75,9 @@ type Rule struct {
 	ThresholdUnit  string   `json:"threshold_unit"`
 	DeleteData     bool     `json:"delete_data"`
 	LogicOperator  string   `json:"logic_operator"`
-	SeedRatio      *float64 `json:"seed_ratio"` // nil means not set
-	Enabled        *bool    `json:"enabled"`     // nil treated as true (backwards compat)
+	SeedRatio      *float64 `json:"seed_ratio"`       // nil means not set
+	Enabled        *bool    `json:"enabled"`           // nil treated as true (backwards compat)
+	TrackerStatus  string   `json:"tracker_status"`    // e.g. "unregistered torrent" — matched case-insensitively against tracker status
 }
 
 // IsEnabled returns whether the rule is active. Nil defaults to true.

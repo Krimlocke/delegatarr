@@ -1099,6 +1099,7 @@ func parseRuleForm(r *http.Request) config.Rule {
 		LogicOperator:  truncStr(r.FormValue("logic_operator"), 10),
 		SeedRatio:      seedRatio,
 		Enabled:        &enabled,
+		TrackerStatus:  truncStr(strings.TrimSpace(r.FormValue("tracker_status")), 200),
 	}
 }
 
@@ -1109,7 +1110,10 @@ func validateRule(r config.Rule) string {
 	if r.Label == "" {
 		return "Deluge Label cannot be empty."
 	}
-	if r.ThresholdValue <= 0 {
+	if r.ThresholdValue <= 0 && r.TrackerStatus == "" {
+		return "Threshold time must be greater than 0 (or set a Tracker Status condition)."
+	}
+	if r.ThresholdValue < 0 {
 		return "Threshold time must be greater than 0."
 	}
 	if r.MinTorrents < 0 {

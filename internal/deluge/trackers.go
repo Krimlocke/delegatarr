@@ -43,6 +43,35 @@ func FetchTrackerURLs() map[string][]string {
 	return result
 }
 
+// FetchTrackerStatuses makes a raw RPC call to Deluge requesting the "tracker_status"
+// field for all torrents. This returns the human-readable tracker status string
+// (e.g. "Announce OK", "Error: unregistered torrent").
+//
+// Returns a map of torrent hash -> tracker status string.
+// Returns nil on any error (non-fatal; callers treat as empty).
+func FetchTrackerStatuses() map[string]string {
+	if host == "" {
+		return nil
+	}
+
+	u, p := getCredentials()
+
+	conn, err := rawConnect(host, port, u, p)
+	if err != nil {
+		log.Printf("Tracker Status RPC: connection failed: %v", err)
+		return nil
+	}
+	defer conn.Close()
+
+	result, err := rawGetTorrentsTrackerStatus(conn)
+	if err != nil {
+		log.Printf("Tracker Status RPC: fetch failed: %v", err)
+		return nil
+	}
+
+	return result
+}
+
 // rawConn wraps a TLS connection with the Deluge v2 RPC protocol.
 type rawConn struct {
 	tls    *tls.Conn
@@ -277,6 +306,90 @@ func rawGetTorrentsTrackers(rc *rawConn) (map[string][]string, error) {
 
 			if len(urls) > 0 {
 				result[hash] = urls
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// rawGetTorrentsTrackerStatus calls core.get_torrents_status({}, ["tracker_status"]) and
+// parses the response into a map of hash -> tracker status string.
+func rawGetTorrentsTrackerStatus(rc *rawConn) (map[string]string, error) {
+	filterDict := rencode.Dictionary{}
+	keys := rencode.NewList("tracker_status")
+	args := rencode.NewList(filterDict, keys)
+
+	resp, err := rc.call("core.get_torrents_status", args, rencode.Dictionary{})
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]string)
+
+	if resp.Length() == 0 {
+		return result, nil
+	}
+
+	values := resp.Values()
+	if len(values) == 0 {
+		return result, nil
+	}
+
+	dict, ok := values[0].(rencode.Dictionary)
+	if !ok {
+		if asList, ok := values[0].(rencode.List); ok {
+			dict = rencode.Dictionary{}
+			listVals := asList.Values()
+			for i := 0; i+1 < len(listVals); i += 2 {
+				dict.Add(listVals[i], listVals[i+1])
+			}
+		} else {
+			return result, fmt.Errorf("unexpected response type: %T", values[0])
+		}
+	}
+
+	for _, pair := range dict.Values() {
+		kv, ok := pair.(rencode.List)
+		if !ok {
+			continue
+		}
+		kvValues := kv.Values()
+		if len(kvValues) < 2 {
+			continue
+		}
+
+		hashBytes, ok := kvValues[0].([]byte)
+		if !ok {
+			continue
+		}
+		hash := string(hashBytes)
+
+		innerDict, ok := kvValues[1].(rencode.Dictionary)
+		if !ok {
+			continue
+		}
+
+		for _, innerPair := range innerDict.Values() {
+			ikv, ok := innerPair.(rencode.List)
+			if !ok {
+				continue
+			}
+			ikvValues := ikv.Values()
+			if len(ikvValues) < 2 {
+				continue
+			}
+
+			keyBytes, ok := ikvValues[0].([]byte)
+			if !ok {
+				continue
+			}
+			if string(keyBytes) != "tracker_status" {
+				continue
+			}
+
+			if statusBytes, ok := ikvValues[1].([]byte); ok {
+				result[hash] = string(statusBytes)
 			}
 		}
 	}

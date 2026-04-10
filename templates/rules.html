@@ -43,6 +43,12 @@
 			</div>
 			<div class="form-row" style="align-items: flex-end;">
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
+					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Tracker Status Contains</label>
+					<input type="text" name="tracker_status" placeholder="e.g. unregistered torrent" autocomplete="off">
+				</div>
+			</div>
+			<div class="form-row" style="align-items: flex-end; margin-top: 10px;">
+				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Time Metric</label>
 					<select name="time_metric">
 						<option value="seeding_time">Seeding Time ></option>
@@ -53,7 +59,7 @@
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1.5;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Time Threshold</label>
 					<div style="display: flex; gap: 6px;">
-						<input type="number" name="threshold_value" class="input-required" placeholder="Time" step="any" required style="width: 50%;">
+						<input type="number" name="threshold_value" placeholder="Time (optional with tracker status)" step="any" style="width: 50%;">
 						<select name="threshold_unit" style="width: 50%;">
 							<option value="minutes">Minutes</option>
 							<option value="hours" selected>Hours</option>
@@ -134,7 +140,7 @@
     <div id="rulesGrid" class="rules-grid">
         {{if .RulesList}}
         {{range $i, $rule := .RulesList}}
-        <div class="rule-card{{if not $rule.IsEnabled}} rule-card-disabled{{end}}" data-search="{{$rule.GroupID}} {{$rule.Label}} {{$rule.TargetState}} {{$rule.TimeMetric}} {{$rule.SortOrder}}">
+        <div class="rule-card{{if not $rule.IsEnabled}} rule-card-disabled{{end}}" data-search="{{$rule.GroupID}} {{$rule.Label}} {{$rule.TargetState}} {{$rule.TimeMetric}} {{$rule.SortOrder}} {{$rule.TrackerStatus}}">
             <div class="rule-card-header">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <input type="checkbox" class="bulk-check" data-index="{{$i}}" style="accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer;">
@@ -150,6 +156,12 @@
                 </form>
             </div>
             <div class="rule-card-body">
+                {{if $rule.TrackerStatus}}<div class="rule-card-row">
+                    <div class="rule-card-detail" style="flex: 1;">
+                        <span class="rule-card-label">Tracker Status Contains</span>
+                        <span class="rule-card-value" style="color: var(--danger); font-weight: 600;">{{$rule.TrackerStatus}}</span>
+                    </div>
+                </div>{{end}}
                 <div class="rule-card-row">
                     <div class="rule-card-detail">
                         <span class="rule-card-label">Label</span>
@@ -212,6 +224,7 @@ function editRule(index) {
             form.querySelector('[name="group_id"]').value = rule.group_id || '';
             form.querySelector('[name="label"]').value = rule.label || '';
             form.querySelector('[name="target_state"]').value = rule.target_state || 'All';
+            form.querySelector('[name="tracker_status"]').value = rule.tracker_status || '';
             form.querySelector('[name="time_metric"]').value = rule.time_metric || 'seeding_time';
             form.querySelector('[name="threshold_value"]').value = rule.threshold_value || '';
             form.querySelector('[name="threshold_unit"]').value = rule.threshold_unit || 'hours';
