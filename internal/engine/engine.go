@@ -139,13 +139,13 @@ func ProcessTorrents(runType string) {
 	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
 	labelMap := deluge.FetchLabels(c)
 
-	// Fetch full tracker URLs via raw RPC (nil if unavailable — falls back to TrackerHost)
-	fullTrackers := deluge.FetchTrackerURLs()
-
-	// Fetch tracker statuses via raw RPC (nil if unavailable)
-	trackerStatuses := deluge.FetchTrackerStatuses()
-	if trackerStatuses == nil {
-		log.Printf("%s Engine Run: Tracker status fetch returned nil (RPC may have failed)", runType)
+	// Fetch full tracker URLs and statuses via a single raw RPC call
+	trackerData := deluge.FetchTrackerData()
+	var fullTrackers map[string][]string
+	var trackerStatuses map[string]string
+	if trackerData != nil {
+		fullTrackers = trackerData.URLs
+		trackerStatuses = trackerData.Statuses
 	}
 
 	// Detect untagged trackers and notify

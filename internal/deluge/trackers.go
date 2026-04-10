@@ -14,13 +14,18 @@ import (
 	rencode "github.com/gdm85/go-rencode"
 )
 
-// FetchTrackerURLs makes a raw RPC call to Deluge requesting the full "trackers"
-// field for all torrents. This bypasses go-libdeluge's hardcoded statusKeys which
-// only return TrackerHost (a shortened base domain).
+// TrackerData holds the results of the combined tracker RPC call.
+type TrackerData struct {
+	URLs     map[string][]string // torrent hash -> list of tracker URLs
+	Statuses map[string]string   // torrent hash -> tracker status string
+}
+
+// FetchTrackerData makes a single raw RPC call to Deluge requesting both "trackers"
+// and "tracker_status" fields for all torrents. This uses one connection and one
+// RPC call to avoid issues with Deluge's concurrent connection limits.
 //
-// Returns a map of torrent hash -> list of tracker URLs (e.g. "https://sync.td-peers.com/announce").
-// Returns nil on any error (non-fatal; callers fall back to TrackerHost).
-func FetchTrackerURLs() map[string][]string {
+// Returns nil on any error (non-fatal; callers fall back to TrackerHost/empty status).
+func FetchTrackerData() *TrackerData {
 	if host == "" {
 		return nil
 	}
@@ -34,42 +39,24 @@ func FetchTrackerURLs() map[string][]string {
 	}
 	defer conn.Close()
 
-	result, err := rawGetTorrentsTrackers(conn)
+	data, err := rawGetTorrentsTrackersAndStatus(conn)
 	if err != nil {
 		log.Printf("Tracker RPC: fetch failed: %v", err)
 		return nil
 	}
 
-	return result
+	log.Printf("Tracker RPC: fetched data for %d torrent(s) (%d with status)",
+		len(data.URLs), len(data.Statuses))
+	return data
 }
 
-// FetchTrackerStatuses makes a raw RPC call to Deluge requesting the "tracker_status"
-// field for all torrents. This returns the human-readable tracker status string
-// (e.g. "Announce OK", "Error: unregistered torrent").
-//
-// Returns a map of torrent hash -> tracker status string.
-// Returns nil on any error (non-fatal; callers treat as empty).
-func FetchTrackerStatuses() map[string]string {
-	if host == "" {
+// FetchTrackerURLs is a convenience wrapper for callers that only need tracker URLs.
+func FetchTrackerURLs() map[string][]string {
+	data := FetchTrackerData()
+	if data == nil {
 		return nil
 	}
-
-	u, p := getCredentials()
-
-	conn, err := rawConnect(host, port, u, p)
-	if err != nil {
-		log.Printf("Tracker Status RPC: connection failed: %v", err)
-		return nil
-	}
-	defer conn.Close()
-
-	result, err := rawGetTorrentsTrackerStatus(conn)
-	if err != nil {
-		log.Printf("Tracker Status RPC: fetch failed: %v", err)
-		return nil
-	}
-
-	return result
+	return data.URLs
 }
 
 // rawConn wraps a TLS connection with the Deluge v2 RPC protocol.
@@ -183,14 +170,11 @@ func (rc *rawConn) call(method string, args rencode.List, kwargs rencode.Diction
 	return respList, nil
 }
 
-// rawGetTorrentsTrackers calls core.get_torrents_status({}, ["trackers"]) and
-// parses the nested response into a map of hash -> tracker URLs.
-func rawGetTorrentsTrackers(rc *rawConn) (map[string][]string, error) {
-	// args: (filter_dict, keys)
-	// filter_dict = {} (empty = all torrents)
-	// keys = ["trackers"]
+// rawGetTorrentsTrackersAndStatus calls core.get_torrents_status({}, ["trackers", "tracker_status"])
+// in a single RPC call and parses both fields from the response.
+func rawGetTorrentsTrackersAndStatus(rc *rawConn) (*TrackerData, error) {
 	filterDict := rencode.Dictionary{}
-	keys := rencode.NewList("trackers")
+	keys := rencode.NewList("trackers", "tracker_status")
 	args := rencode.NewList(filterDict, keys)
 
 	resp, err := rc.call("core.get_torrents_status", args, rencode.Dictionary{})
@@ -198,24 +182,22 @@ func rawGetTorrentsTrackers(rc *rawConn) (map[string][]string, error) {
 		return nil, err
 	}
 
-	// The response is a dictionary: {torrent_hash: {b"trackers": [tracker_dicts...]}}
-	// In rencode, dictionaries come as lists of alternating key/value pairs
-	result := make(map[string][]string)
+	data := &TrackerData{
+		URLs:     make(map[string][]string),
+		Statuses: make(map[string]string),
+	}
 
 	if resp.Length() == 0 {
-		return result, nil
+		return data, nil
 	}
 
-	// The return value is the first element, which should be a Dictionary
 	values := resp.Values()
 	if len(values) == 0 {
-		return result, nil
+		return data, nil
 	}
 
-	// Try to get it as a Dictionary
 	dict, ok := values[0].(rencode.Dictionary)
 	if !ok {
-		// Sometimes it comes as a List that represents a dictionary
 		if asList, ok := values[0].(rencode.List); ok {
 			dict = rencode.Dictionary{}
 			listVals := asList.Values()
@@ -223,11 +205,10 @@ func rawGetTorrentsTrackers(rc *rawConn) (map[string][]string, error) {
 				dict.Add(listVals[i], listVals[i+1])
 			}
 		} else {
-			return result, fmt.Errorf("unexpected response type: %T", values[0])
+			return data, fmt.Errorf("unexpected response type: %T", values[0])
 		}
 	}
 
-	// Iterate the outer dictionary (hash -> torrent data)
 	for _, pair := range dict.Values() {
 		kv, ok := pair.(rencode.List)
 		if !ok {
@@ -244,7 +225,6 @@ func rawGetTorrentsTrackers(rc *rawConn) (map[string][]string, error) {
 		}
 		hash := string(hashBytes)
 
-		// Inner value is a dict with "trackers" key
 		innerDict, ok := kvValues[1].(rencode.Dictionary)
 		if !ok {
 			continue
@@ -264,141 +244,63 @@ func rawGetTorrentsTrackers(rc *rawConn) (map[string][]string, error) {
 			if !ok {
 				continue
 			}
-			if string(keyBytes) != "trackers" {
-				continue
-			}
+			key := string(keyBytes)
 
-			// Value is a list of tracker dicts, each with "url" key
-			trackerList, ok := ikvValues[1].(rencode.List)
-			if !ok {
-				continue
-			}
-
-			var urls []string
-			for _, trackerItem := range trackerList.Values() {
-				trackerDict, ok := trackerItem.(rencode.Dictionary)
+			switch key {
+			case "trackers":
+				trackerList, ok := ikvValues[1].(rencode.List)
 				if !ok {
 					continue
 				}
-				for _, tPair := range trackerDict.Values() {
-					tkv, ok := tPair.(rencode.List)
+				var urls []string
+				for _, trackerItem := range trackerList.Values() {
+					trackerDict, ok := trackerItem.(rencode.Dictionary)
 					if !ok {
 						continue
 					}
-					tkvValues := tkv.Values()
-					if len(tkvValues) < 2 {
-						continue
-					}
-					tKey, ok := tkvValues[0].([]byte)
-					if !ok {
-						continue
-					}
-					if string(tKey) == "url" {
-						if urlBytes, ok := tkvValues[1].([]byte); ok {
-							url := string(urlBytes)
-							if url != "" {
-								urls = append(urls, url)
+					for _, tPair := range trackerDict.Values() {
+						tkv, ok := tPair.(rencode.List)
+						if !ok {
+							continue
+						}
+						tkvValues := tkv.Values()
+						if len(tkvValues) < 2 {
+							continue
+						}
+						tKey, ok := tkvValues[0].([]byte)
+						if !ok {
+							continue
+						}
+						if string(tKey) == "url" {
+							switch v := tkvValues[1].(type) {
+							case []byte:
+								if s := string(v); s != "" {
+									urls = append(urls, s)
+								}
+							case string:
+								if v != "" {
+									urls = append(urls, v)
+								}
 							}
 						}
 					}
 				}
-			}
+				if len(urls) > 0 {
+					data.URLs[hash] = urls
+				}
 
-			if len(urls) > 0 {
-				result[hash] = urls
-			}
-		}
-	}
-
-	return result, nil
-}
-
-// rawGetTorrentsTrackerStatus calls core.get_torrents_status({}, ["tracker_status"]) and
-// parses the response into a map of hash -> tracker status string.
-func rawGetTorrentsTrackerStatus(rc *rawConn) (map[string]string, error) {
-	filterDict := rencode.Dictionary{}
-	keys := rencode.NewList("tracker_status")
-	args := rencode.NewList(filterDict, keys)
-
-	resp, err := rc.call("core.get_torrents_status", args, rencode.Dictionary{})
-	if err != nil {
-		return nil, err
-	}
-
-	result := make(map[string]string)
-
-	if resp.Length() == 0 {
-		return result, nil
-	}
-
-	values := resp.Values()
-	if len(values) == 0 {
-		return result, nil
-	}
-
-	dict, ok := values[0].(rencode.Dictionary)
-	if !ok {
-		if asList, ok := values[0].(rencode.List); ok {
-			dict = rencode.Dictionary{}
-			listVals := asList.Values()
-			for i := 0; i+1 < len(listVals); i += 2 {
-				dict.Add(listVals[i], listVals[i+1])
-			}
-		} else {
-			return result, fmt.Errorf("unexpected response type: %T", values[0])
-		}
-	}
-
-	for _, pair := range dict.Values() {
-		kv, ok := pair.(rencode.List)
-		if !ok {
-			continue
-		}
-		kvValues := kv.Values()
-		if len(kvValues) < 2 {
-			continue
-		}
-
-		hashBytes, ok := kvValues[0].([]byte)
-		if !ok {
-			continue
-		}
-		hash := string(hashBytes)
-
-		innerDict, ok := kvValues[1].(rencode.Dictionary)
-		if !ok {
-			continue
-		}
-
-		for _, innerPair := range innerDict.Values() {
-			ikv, ok := innerPair.(rencode.List)
-			if !ok {
-				continue
-			}
-			ikvValues := ikv.Values()
-			if len(ikvValues) < 2 {
-				continue
-			}
-
-			keyBytes, ok := ikvValues[0].([]byte)
-			if !ok {
-				continue
-			}
-			if string(keyBytes) != "tracker_status" {
-				continue
-			}
-
-			switch v := ikvValues[1].(type) {
-			case []byte:
-				result[hash] = string(v)
-			case string:
-				result[hash] = v
-			default:
-				log.Printf("Tracker Status RPC: unexpected value type %T for hash %s", ikvValues[1], hash)
+			case "tracker_status":
+				switch v := ikvValues[1].(type) {
+				case []byte:
+					data.Statuses[hash] = string(v)
+				case string:
+					data.Statuses[hash] = v
+				default:
+					log.Printf("Tracker RPC: unexpected tracker_status type %T for hash %s", ikvValues[1], hash)
+				}
 			}
 		}
 	}
 
-	log.Printf("Tracker Status RPC: fetched status for %d torrent(s)", len(result))
-	return result, nil
+	return data, nil
 }
