@@ -1,0 +1,431 @@
+package engine
+
+import (
+	"log"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/krimlocke/delegatarr/internal/config"
+	"github.com/krimlocke/delegatarr/internal/deluge"
+	"github.com/krimlocke/delegatarr/internal/notify"
+)
+
+var (
+	EngineLock sync.Mutex
+	ConfigLock sync.Mutex
+
+	// lastNotifiedUntagged tracks which untagged trackers we already notified about
+	// so we don't spam on every engine run.
+	lastNotifiedUntagged string
+)
+
+// TrackerSummary maps tracker domain -> torrent count.
+type TrackerSummary map[string]int
+
+// GetDashboardData retrieves active tracker domains and unique labels from Deluge.
+func GetDashboardData() (TrackerSummary, []string) {
+	c, err := deluge.NewClient()
+	if err != nil {
+		log.Printf("Deluge Error: %v", err)
+		return TrackerSummary{}, nil
+	}
+	defer c.Close()
+
+	torrents, err := c.TorrentsStatus(deluge.StateUnspecified, nil)
+	if err != nil {
+		log.Printf("Deluge Error: %v", err)
+		return TrackerSummary{}, nil
+	}
+
+	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
+	labelMap := deluge.FetchLabels(c)
+
+	// Fetch full tracker URLs via raw RPC (nil if unavailable — falls back to TrackerHost)
+	fullTrackers := deluge.FetchTrackerURLs()
+
+	settings := config.GetSettings()
+	trackerMode := settings.TrackerMode
+
+	summary := TrackerSummary{}
+	labelsSet := map[string]bool{}
+
+	for hash, ts := range torrents {
+		t := deluge.FromStatus(ts, labelMap[hash], deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
+
+		if t.Label != "" {
+			labelsSet[t.Label] = true
+		}
+
+		trackerURLs := extractTrackerURLs(t)
+		if trackerMode == "top" && len(trackerURLs) > 0 {
+			trackerURLs = trackerURLs[:1]
+		}
+
+		seen := map[string]bool{}
+		for _, rawURL := range trackerURLs {
+			domain := extractDomain(rawURL)
+			if domain != "" && !seen[domain] {
+				seen[domain] = true
+				summary[domain]++
+			}
+		}
+	}
+
+	labels := make([]string, 0, len(labelsSet))
+	for l := range labelsSet {
+		labels = append(labels, l)
+	}
+	sort.Strings(labels)
+
+	// Migrate Python-style tracker domains to Go-style if needed
+	activeDomains := make([]string, 0, len(summary))
+	for domain := range summary {
+		activeDomains = append(activeDomains, domain)
+	}
+	config.MigrateGroups(activeDomains)
+
+	return summary, labels
+}
+
+// torrentCandidate holds a torrent being evaluated for removal.
+type torrentCandidate struct {
+	ID            string
+	Name          string
+	SeedingHours  float64
+	TimeAdded     float64
+	TriggerValue  float64
+	Ratio         float64
+	TrackerStatus string
+}
+
+// ProcessTorrents is the background engine that evaluates torrents against removal rules.
+func ProcessTorrents(runType string) {
+	if !EngineLock.TryLock() {
+		log.Printf("%s Engine Run: Skipped. Another run is already in progress.", runType)
+		return
+	}
+	defer EngineLock.Unlock()
+
+	ConfigLock.Lock()
+	groups := config.LoadGroups()
+	rules := config.LoadRules()
+	ConfigLock.Unlock()
+
+	if len(rules) == 0 || len(groups) == 0 {
+		log.Printf("%s Engine Run: Skipped. No tags or rules are configured yet.", runType)
+		return
+	}
+
+	currentTime := float64(time.Now().Unix())
+	settings := config.GetSettings()
+	trackerMode := settings.TrackerMode
+	isDryRun := settings.DryRun
+
+	c, err := deluge.NewClient()
+	if err != nil {
+		log.Printf("Engine Run: Skipped. %v", err)
+		return
+	}
+	defer c.Close()
+
+	torrents, err := c.TorrentsStatus(deluge.StateUnspecified, nil)
+	if err != nil {
+		log.Printf("Engine Run Error: %v", err)
+		return
+	}
+
+	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
+	labelMap := deluge.FetchLabels(c)
+
+	// Fetch full tracker URLs via raw RPC (nil if unavailable — falls back to TrackerHost)
+	fullTrackers := deluge.FetchTrackerURLs()
+
+	// Detect untagged trackers and notify
+	if settings.NotifyUntagged && settings.WebhookURL != "" {
+		untaggedSet := map[string]bool{}
+		for hash, ts := range torrents {
+			t := deluge.FromStatus(ts, "", deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
+			trackerURLs := extractTrackerURLs(t)
+			for _, rawURL := range trackerURLs {
+				domain := extractDomain(rawURL)
+				if domain != "" {
+					if _, tagged := groups[domain]; !tagged {
+						untaggedSet[domain] = true
+					}
+				}
+			}
+		}
+		if len(untaggedSet) > 0 {
+			var untagged []string
+			for d := range untaggedSet {
+				untagged = append(untagged, d)
+			}
+			sort.Strings(untagged)
+			fingerprint := strings.Join(untagged, ",")
+			if fingerprint != lastNotifiedUntagged {
+				lastNotifiedUntagged = fingerprint
+				notify.SendUntaggedTrackerNotification(untagged)
+			}
+		} else {
+			lastNotifiedUntagged = ""
+		}
+	}
+
+	type removalEntry struct {
+		ID         string
+		Name       string
+		Tag        string
+		State      string
+		Metric     string
+		DeleteData bool
+	}
+
+	var toRemove []removalEntry
+	seenIDs := map[string]bool{}
+
+	for _, rule := range rules {
+		if !rule.IsEnabled() {
+			continue
+		}
+		targetGroup := rule.GroupID
+		targetLabel := rule.Label
+		targetState := rule.TargetState
+		timeMetric := rule.TimeMetric
+
+		minTorrents := rule.MinTorrents
+		thresholdVal := rule.ThresholdValue
+		thresholdUnit := rule.ThresholdUnit
+
+		var ruleMaxHours float64
+		switch thresholdUnit {
+		case "minutes":
+			ruleMaxHours = thresholdVal / 60.0
+		case "days":
+			ruleMaxHours = thresholdVal * 24.0
+		default:
+			ruleMaxHours = thresholdVal
+		}
+
+		sortOrder := rule.SortOrder
+		var matching []torrentCandidate
+
+		for hash, ts := range torrents {
+			t := deluge.FromStatus(ts, labelMap[hash], deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
+
+			name := t.Name
+			label := t.Label
+			state := t.State
+
+			if targetState != "All" && state != targetState {
+				continue
+			}
+
+			seedingHours := float64(t.SeedingTime) / 3600.0
+			timeAdded := t.TimeAdded
+			activeHours := float64(t.ActiveTime) / 3600.0
+			ratio := t.Ratio
+
+			totalAgeHours := (currentTime - timeAdded) / 3600.0
+			pausedHours := totalAgeHours - activeHours
+			if pausedHours < 0 {
+				pausedHours = 0
+			}
+
+			trackerURLs := extractTrackerURLs(t)
+			if len(trackerURLs) == 0 {
+				continue
+			}
+			if trackerMode == "top" {
+				trackerURLs = trackerURLs[:1]
+			}
+
+			matchedGroup := false
+			for _, rawURL := range trackerURLs {
+				domain := extractDomain(rawURL)
+				if groups[domain] == targetGroup {
+					matchedGroup = true
+					break
+				}
+			}
+
+			if matchedGroup && strings.EqualFold(label, targetLabel) {
+				var triggerValue float64
+				switch timeMetric {
+				case "time_added":
+					triggerValue = totalAgeHours
+				case "time_paused":
+					triggerValue = pausedHours
+				default:
+					triggerValue = seedingHours
+				}
+
+				matching = append(matching, torrentCandidate{
+					ID:            hash,
+					Name:          name,
+					SeedingHours:  seedingHours,
+					TimeAdded:     timeAdded,
+					TriggerValue:  triggerValue,
+					Ratio:         ratio,
+					TrackerStatus: t.TrackerStatus,
+				})
+			}
+		}
+
+		if len(matching) == 0 {
+			if rule.TrackerStatus != "" {
+				log.Printf("%s Engine Run: Rule '%s' (tracker status: %q) — no torrents matched group+label filter",
+					runType, targetGroup, rule.TrackerStatus)
+			}
+			continue
+		}
+
+		// Sort: protected torrents first, removal candidates at the tail.
+		switch sortOrder {
+		case "oldest_added":
+			sort.Slice(matching, func(i, j int) bool { return matching[i].TimeAdded > matching[j].TimeAdded })
+		case "newest_added":
+			sort.Slice(matching, func(i, j int) bool { return matching[i].TimeAdded < matching[j].TimeAdded })
+		case "longest_seeding":
+			sort.Slice(matching, func(i, j int) bool { return matching[i].SeedingHours < matching[j].SeedingHours })
+		case "shortest_seeding":
+			sort.Slice(matching, func(i, j int) bool { return matching[i].SeedingHours > matching[j].SeedingHours })
+		}
+
+		// If a minimum-keep count is set, ensure we never drop below it.
+		// When the pool is at or below the minimum, skip this rule entirely.
+		candidates := matching
+		if minTorrents > 0 {
+			if len(matching) <= minTorrents {
+				log.Printf("%s Engine Run: Rule '%s' skipped — only %d torrent(s) matched, minimum keep is %d.",
+					runType, targetGroup, len(matching), minTorrents)
+				continue
+			}
+			candidates = matching[minTorrents:]
+		}
+
+		ruleTrackerStatus := strings.ToLower(strings.TrimSpace(rule.TrackerStatus))
+
+		if ruleTrackerStatus != "" {
+			log.Printf("%s Engine Run: Rule '%s' has tracker status filter: %q, evaluating %d candidate(s)",
+				runType, targetGroup, ruleTrackerStatus, len(candidates))
+		}
+
+		for _, t := range candidates {
+			if seenIDs[t.ID] {
+				continue
+			}
+
+			// Tracker status condition: match if torrent's tracker status contains the rule's pattern
+			trackerStatusMet := false
+			if ruleTrackerStatus != "" {
+				trackerStatusMet = strings.Contains(strings.ToLower(t.TrackerStatus), ruleTrackerStatus)
+				if !trackerStatusMet {
+					log.Printf("%s Engine Run: Torrent '%s' tracker status %q does not match filter %q",
+						runType, t.Name, t.TrackerStatus, ruleTrackerStatus)
+				}
+			}
+
+			// Time/ratio conditions (only evaluated when threshold is configured)
+			timeCondMet := ruleMaxHours > 0 && t.TriggerValue >= ruleMaxHours
+
+			meetsCriteria := false
+			if ruleTrackerStatus != "" && ruleMaxHours == 0 && rule.SeedRatio == nil {
+				// Tracker status is the sole condition
+				meetsCriteria = trackerStatusMet
+			} else if ruleTrackerStatus != "" {
+				// Tracker status combined with time/ratio via the logic operator
+				timeRatioCond := timeCondMet
+				if rule.SeedRatio != nil {
+					ratioCondMet := t.Ratio >= *rule.SeedRatio
+					if rule.LogicOperator == "AND" {
+						timeRatioCond = timeCondMet && ratioCondMet
+					} else {
+						timeRatioCond = timeCondMet || ratioCondMet
+					}
+				}
+				if rule.LogicOperator == "AND" {
+					meetsCriteria = trackerStatusMet && timeRatioCond
+				} else {
+					meetsCriteria = trackerStatusMet || timeRatioCond
+				}
+			} else {
+				// Original logic: time/ratio only
+				meetsCriteria = timeCondMet
+				if rule.SeedRatio != nil {
+					ratioCondMet := t.Ratio >= *rule.SeedRatio
+					if rule.LogicOperator == "AND" {
+						meetsCriteria = timeCondMet && ratioCondMet
+					} else {
+						meetsCriteria = timeCondMet || ratioCondMet
+					}
+				}
+			}
+
+			if meetsCriteria {
+				seenIDs[t.ID] = true
+				toRemove = append(toRemove, removalEntry{
+					ID:         t.ID,
+					Name:       t.Name,
+					Tag:        targetGroup,
+					State:      targetState,
+					Metric:     timeMetric,
+					DeleteData: rule.DeleteData,
+				})
+			}
+		}
+	}
+
+	removedCount := 0
+	if len(toRemove) == 0 {
+		log.Printf("%s Engine Run: Checked Deluge, no torrents met removal criteria.", runType)
+		return
+	}
+
+	var notifyEntries []notify.RemovalEntry
+
+	for _, entry := range toRemove {
+		if isDryRun {
+			log.Printf("[DRY RUN] Would have removed: '%s' (Tag: %s, State: %s, Metric: %s, Delete Data: %v)",
+				entry.Name, entry.Tag, entry.State, entry.Metric, entry.DeleteData)
+			removedCount++
+			notifyEntries = append(notifyEntries, notify.RemovalEntry{Name: entry.Name, Tag: entry.Tag, State: entry.State})
+		} else {
+			if _, err := c.RemoveTorrent(entry.ID, entry.DeleteData); err != nil {
+				log.Printf("Failed to remove '%s': %v", entry.Name, err)
+			} else {
+				log.Printf("Rule Matched! Removed: '%s' (Tag: %s, State: %s, Metric: %s, Delete Data: %v)",
+					entry.Name, entry.Tag, entry.State, entry.Metric, entry.DeleteData)
+				removedCount++
+				notifyEntries = append(notifyEntries, notify.RemovalEntry{Name: entry.Name, Tag: entry.Tag, State: entry.State})
+			}
+		}
+	}
+
+	// Send webhook notification for removals
+	if len(notifyEntries) > 0 {
+		notify.SendRemovalNotification(notifyEntries, isDryRun)
+	}
+
+	modeText := ""
+	actionText := "removed"
+	if isDryRun {
+		modeText = "[DRY RUN] "
+		actionText = "identified"
+	}
+	log.Printf("%s%s Engine Run: Completed. Successfully %s %d torrent(s).", modeText, runType, actionText, removedCount)
+}
+
+// --- helpers ---
+
+func extractDomain(rawURL string) string {
+	if idx := strings.Index(rawURL, "//"); idx >= 0 {
+		rest := rawURL[idx+2:]
+		if slashIdx := strings.Index(rest, "/"); slashIdx >= 0 {
+			return rest[:slashIdx]
+		}
+		return rest
+	}
+	return rawURL
+}
