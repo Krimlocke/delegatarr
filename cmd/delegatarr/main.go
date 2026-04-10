@@ -48,7 +48,9 @@ func main() {
 	apiToken := os.Getenv("API_TOKEN")
 	if apiToken == "" {
 		b := make([]byte, 32)
-		rand.Read(b)
+		if _, err := rand.Read(b); err != nil {
+			log.Fatalf("Failed to generate API token: %v", err)
+		}
 		apiToken = hex.EncodeToString(b)
 	}
 	routes.SetAPIToken(apiToken)
@@ -149,8 +151,12 @@ func getOrCreateSecretKey() []byte {
 	}
 
 	key := make([]byte, 32)
-	rand.Read(key)
-	os.WriteFile(config.SecretKeyFile, key, 0o600)
+	if _, err := rand.Read(key); err != nil {
+		log.Fatalf("Failed to generate secret key: %v", err)
+	}
+	if err := os.WriteFile(config.SecretKeyFile, key, 0o600); err != nil {
+		log.Printf("Warning: could not persist secret key to %s: %v", config.SecretKeyFile, err)
+	}
 	return key
 }
 

@@ -252,8 +252,11 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse logs for recent events and removal stats
-	logData, _ := os.ReadFile(config.LogFile)
-	logLines := strings.Split(strings.TrimRight(string(logData), "\n"), "\n")
+	logData, err := os.ReadFile(config.LogFile)
+	var logLines []string
+	if err == nil && len(logData) > 0 {
+		logLines = strings.Split(strings.TrimRight(string(logData), "\n"), "\n")
+	}
 
 	now := time.Now()
 	todayStr := now.Format("2006-01-02")
@@ -644,7 +647,12 @@ func exportSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	engine.ConfigLock.Unlock()
 
-	data, _ := json.MarshalIndent(backup, "", "    ")
+	data, err := json.MarshalIndent(backup, "", "    ")
+	if err != nil {
+		log.Printf("Export error: %v", err)
+		http.Error(w, "Failed to export settings", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=delegatarr_backup.json")
 	w.Write(data)
@@ -811,7 +819,10 @@ func addRuleHandler(w http.ResponseWriter, r *http.Request) {
 
 func editRuleHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
-	idx, _ := strconv.Atoi(mux.Vars(r)["index"])
+	idx := parseIndex(w, r)
+	if idx < 0 {
+		return
+	}
 
 	rule := parseRuleForm(r)
 	if errMsg := validateRule(rule); errMsg != "" {
@@ -843,7 +854,10 @@ func editRuleHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func toggleRuleHandler(w http.ResponseWriter, r *http.Request) {
-	idx, _ := strconv.Atoi(mux.Vars(r)["index"])
+	idx := parseIndex(w, r)
+	if idx < 0 {
+		return
+	}
 
 	engine.ConfigLock.Lock()
 	rules := config.LoadRules()
@@ -864,7 +878,10 @@ func toggleRuleHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteRuleHandler(w http.ResponseWriter, r *http.Request) {
-	idx, _ := strconv.Atoi(mux.Vars(r)["index"])
+	idx := parseIndex(w, r)
+	if idx < 0 {
+		return
+	}
 
 	engine.ConfigLock.Lock()
 	rules := config.LoadRules()
@@ -978,7 +995,10 @@ func apiRuleHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden", 403)
 		return
 	}
-	idx, _ := strconv.Atoi(mux.Vars(r)["index"])
+	idx := parseIndex(w, r)
+	if idx < 0 {
+		return
+	}
 
 	engine.ConfigLock.Lock()
 	rules := config.LoadRules()
@@ -1135,6 +1155,16 @@ func truncStr(s string, max int) string {
 		return s[:max]
 	}
 	return s
+}
+
+// parseIndex extracts and validates a rule index from the URL. Returns -1 on error.
+func parseIndex(w http.ResponseWriter, r *http.Request) int {
+	idx, err := strconv.Atoi(mux.Vars(r)["index"])
+	if err != nil || idx < 0 {
+		http.Error(w, "Invalid rule index", http.StatusBadRequest)
+		return -1
+	}
+	return idx
 }
 
 // findDuplicateRule checks if any existing rule (excluding excludeIdx) shares the same
