@@ -14,18 +14,13 @@ import (
 	rencode "github.com/gdm85/go-rencode"
 )
 
-// TrackerData holds the results of the combined tracker RPC call.
-type TrackerData struct {
-	URLs     map[string][]string // torrent hash -> list of tracker URLs
-	Statuses map[string]string   // torrent hash -> tracker status string
-}
-
-// FetchTrackerData makes a single raw RPC call to Deluge requesting both "trackers"
-// and "tracker_status" fields for all torrents. This uses one connection and one
-// RPC call to avoid issues with Deluge's concurrent connection limits.
+// FetchTrackerURLs makes a raw RPC call to Deluge requesting the full "trackers"
+// field for all torrents. This bypasses go-libdeluge's hardcoded statusKeys which
+// only return TrackerHost (a shortened base domain).
 //
-// Returns nil on any error (non-fatal; callers fall back to TrackerHost/empty status).
-func FetchTrackerData() *TrackerData {
+// Returns a map of torrent hash -> list of tracker URLs (e.g. "https://sync.td-peers.com/announce").
+// Returns nil on any error (non-fatal; callers fall back to TrackerHost).
+func FetchTrackerURLs() map[string][]string {
 	if host == "" {
 		return nil
 	}
@@ -39,24 +34,13 @@ func FetchTrackerData() *TrackerData {
 	}
 	defer conn.Close()
 
-	data, err := rawGetTorrentsTrackersAndStatus(conn)
+	result, err := rawGetTorrentsTrackers(conn)
 	if err != nil {
 		log.Printf("Tracker RPC: fetch failed: %v", err)
 		return nil
 	}
 
-	log.Printf("Tracker RPC: fetched data for %d torrent(s) (%d with status)",
-		len(data.URLs), len(data.Statuses))
-	return data
-}
-
-// FetchTrackerURLs is a convenience wrapper for callers that only need tracker URLs.
-func FetchTrackerURLs() map[string][]string {
-	data := FetchTrackerData()
-	if data == nil {
-		return nil
-	}
-	return data.URLs
+	return result
 }
 
 // rawConn wraps a TLS connection with the Deluge v2 RPC protocol.
@@ -170,11 +154,11 @@ func (rc *rawConn) call(method string, args rencode.List, kwargs rencode.Diction
 	return respList, nil
 }
 
-// rawGetTorrentsTrackersAndStatus calls core.get_torrents_status({}, ["trackers", "tracker_status"])
-// in a single RPC call and parses both fields from the response.
-func rawGetTorrentsTrackersAndStatus(rc *rawConn) (*TrackerData, error) {
+// rawGetTorrentsTrackers calls core.get_torrents_status({}, ["trackers"]) and
+// parses the nested response into a map of hash -> tracker URLs.
+func rawGetTorrentsTrackers(rc *rawConn) (map[string][]string, error) {
 	filterDict := rencode.Dictionary{}
-	keys := rencode.NewList("trackers", "tracker_status")
+	keys := rencode.NewList("trackers")
 	args := rencode.NewList(filterDict, keys)
 
 	resp, err := rc.call("core.get_torrents_status", args, rencode.Dictionary{})
@@ -182,18 +166,15 @@ func rawGetTorrentsTrackersAndStatus(rc *rawConn) (*TrackerData, error) {
 		return nil, err
 	}
 
-	data := &TrackerData{
-		URLs:     make(map[string][]string),
-		Statuses: make(map[string]string),
-	}
+	result := make(map[string][]string)
 
 	if resp.Length() == 0 {
-		return data, nil
+		return result, nil
 	}
 
 	values := resp.Values()
 	if len(values) == 0 {
-		return data, nil
+		return result, nil
 	}
 
 	dict, ok := values[0].(rencode.Dictionary)
@@ -205,7 +186,7 @@ func rawGetTorrentsTrackersAndStatus(rc *rawConn) (*TrackerData, error) {
 				dict.Add(listVals[i], listVals[i+1])
 			}
 		} else {
-			return data, fmt.Errorf("unexpected response type: %T", values[0])
+			return result, fmt.Errorf("unexpected response type: %T", values[0])
 		}
 	}
 
@@ -244,63 +225,54 @@ func rawGetTorrentsTrackersAndStatus(rc *rawConn) (*TrackerData, error) {
 			if !ok {
 				continue
 			}
-			key := string(keyBytes)
+			if string(keyBytes) != "trackers" {
+				continue
+			}
 
-			switch key {
-			case "trackers":
-				trackerList, ok := ikvValues[1].(rencode.List)
+			trackerList, ok := ikvValues[1].(rencode.List)
+			if !ok {
+				continue
+			}
+
+			var urls []string
+			for _, trackerItem := range trackerList.Values() {
+				trackerDict, ok := trackerItem.(rencode.Dictionary)
 				if !ok {
 					continue
 				}
-				var urls []string
-				for _, trackerItem := range trackerList.Values() {
-					trackerDict, ok := trackerItem.(rencode.Dictionary)
+				for _, tPair := range trackerDict.Values() {
+					tkv, ok := tPair.(rencode.List)
 					if !ok {
 						continue
 					}
-					for _, tPair := range trackerDict.Values() {
-						tkv, ok := tPair.(rencode.List)
-						if !ok {
-							continue
-						}
-						tkvValues := tkv.Values()
-						if len(tkvValues) < 2 {
-							continue
-						}
-						tKey, ok := tkvValues[0].([]byte)
-						if !ok {
-							continue
-						}
-						if string(tKey) == "url" {
-							switch v := tkvValues[1].(type) {
-							case []byte:
-								if s := string(v); s != "" {
-									urls = append(urls, s)
-								}
-							case string:
-								if v != "" {
-									urls = append(urls, v)
-								}
+					tkvValues := tkv.Values()
+					if len(tkvValues) < 2 {
+						continue
+					}
+					tKey, ok := tkvValues[0].([]byte)
+					if !ok {
+						continue
+					}
+					if string(tKey) == "url" {
+						switch v := tkvValues[1].(type) {
+						case []byte:
+							if s := string(v); s != "" {
+								urls = append(urls, s)
+							}
+						case string:
+							if v != "" {
+								urls = append(urls, v)
 							}
 						}
 					}
 				}
-				if len(urls) > 0 {
-					data.URLs[hash] = urls
-				}
+			}
 
-			case "tracker_status":
-				switch v := ikvValues[1].(type) {
-				case []byte:
-					data.Statuses[hash] = string(v)
-				case string:
-					data.Statuses[hash] = v
-				default:
-					log.Printf("Tracker RPC: unexpected tracker_status type %T for hash %s", ikvValues[1], hash)
-				}
+			if len(urls) > 0 {
+				result[hash] = urls
 			}
 		}
 	}
 
-	return data, nil
+	return result, nil
 }

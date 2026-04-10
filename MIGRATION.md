@@ -111,7 +111,7 @@ With multi-tracker support now active, the Go version extracts the same full sub
 ### 15. Tracker Status Rule Condition
 Rules can now match torrents based on their Deluge tracker status string (e.g. `Error: unregistered torrent`). A new `tracker_status` field on the Rule struct performs a case-insensitive substring match against each torrent's tracker status.
 
-`FetchTrackerStatuses()` in `trackers.go` makes a raw RPC call to `core.get_torrents_status({}, ["tracker_status"])` alongside the existing tracker URL fetch. The status is carried through `TorrentInfo.TrackerStatus` via the new `FromStatusOpts` struct, which replaces the previous variadic `[]string` parameter on `FromStatus()`.
+The `go-libdeluge` library already requests `tracker_status` in its `statusKeys` and exposes it as `TorrentStatus.TrackerStatus`. `FromStatus()` reads it directly from the library struct — no additional RPC call is needed. The `FromStatusOpts` struct (which replaced the previous variadic `[]string` parameter) now only carries full tracker URLs.
 
 Three evaluation modes in the engine:
 - **Tracker status only**: When `tracker_status` is set but time threshold is 0 and no seed ratio — removes solely on status match
