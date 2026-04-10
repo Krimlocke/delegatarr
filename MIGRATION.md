@@ -108,7 +108,19 @@ A `MigrateGroups` function in `config.go` runs automatically on dashboard load. 
 
 With multi-tracker support now active, the Go version extracts the same full subdomain URLs as the Python version, so new tracker entries will match the Python format going forward.
 
-### 15. Dashboard Activity Feed Filter
+### 15. Tracker Status Rule Condition
+Rules can now match torrents based on their Deluge tracker status string (e.g. `Error: unregistered torrent`). A new `tracker_status` field on the Rule struct performs a case-insensitive substring match against each torrent's tracker status.
+
+`FetchTrackerStatuses()` in `trackers.go` makes a raw RPC call to `core.get_torrents_status({}, ["tracker_status"])` alongside the existing tracker URL fetch. The status is carried through `TorrentInfo.TrackerStatus` via the new `FromStatusOpts` struct, which replaces the previous variadic `[]string` parameter on `FromStatus()`.
+
+Three evaluation modes in the engine:
+- **Tracker status only**: When `tracker_status` is set but time threshold is 0 and no seed ratio — removes solely on status match
+- **Combined**: Tracker status is OR'd/AND'd with time/ratio conditions using the existing logic operator
+- **Original**: When `tracker_status` is empty, behavior is unchanged
+
+The rules form adds a "Tracker Status Contains" text input in the Removal Conditions section. Time threshold is no longer required when tracker status is set. Rule cards display the tracker status pattern highlighted in red when configured.
+
+### 16. Dashboard Activity Feed Filter
 The Recent Activity feed on the dashboard now has a "Removals only" toggle switch that filters the feed to show only torrent removal events. Removal entries display enriched detail: tag, state, time metric, and whether data was deleted (color-coded red/green). The toggle preference is saved to `localStorage` and persists across sessions.
 
 ## Known Limitations
