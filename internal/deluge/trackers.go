@@ -14,32 +14,67 @@ import (
 	rencode "github.com/gdm85/go-rencode"
 )
 
+// RawSession is an open raw RPC connection to the Deluge daemon.
+// Obtain one with OpenRawSession and always call Close when done.
+type RawSession struct {
+	conn *rawConn
+}
+
+// OpenRawSession opens a dedicated raw TLS connection to Deluge for
+// operations not covered by go-libdeluge (e.g. fetching full tracker URLs).
+// Returns nil without error when DELUGE_HOST is not configured.
+func OpenRawSession() (*RawSession, error) {
+	if host == "" {
+		return nil, nil
+	}
+	u, p := getCredentials()
+	conn, err := rawConnect(host, port, u, p)
+	if err != nil {
+		return nil, err
+	}
+	return &RawSession{conn: conn}, nil
+}
+
+// Close releases the underlying connection.
+func (s *RawSession) Close() {
+	if s != nil && s.conn != nil {
+		s.conn.Close()
+	}
+}
+
 // FetchTrackerURLs makes a raw RPC call to Deluge requesting the full "trackers"
 // field for all torrents. This bypasses go-libdeluge's hardcoded statusKeys which
 // only return TrackerHost (a shortened base domain).
 //
 // Returns a map of torrent hash -> list of tracker URLs (e.g. "https://sync.td-peers.com/announce").
 // Returns nil on any error (non-fatal; callers fall back to TrackerHost).
+//
+// Deprecated: prefer FetchTrackerURLsSession to reuse an existing RawSession.
 func FetchTrackerURLs() map[string][]string {
-	if host == "" {
-		return nil
-	}
-
-	u, p := getCredentials()
-
-	conn, err := rawConnect(host, port, u, p)
+	s, err := OpenRawSession()
 	if err != nil {
 		log.Printf("Tracker RPC: connection failed: %v", err)
 		return nil
 	}
-	defer conn.Close()
+	if s == nil {
+		return nil
+	}
+	defer s.Close()
+	return FetchTrackerURLsSession(s)
+}
 
-	result, err := rawGetTorrentsTrackers(conn)
+// FetchTrackerURLsSession fetches full tracker URLs using an already-open RawSession,
+// avoiding a second TLS dial when the caller already holds a session.
+// Returns nil if s is nil (safe to call unconditionally).
+func FetchTrackerURLsSession(s *RawSession) map[string][]string {
+	if s == nil {
+		return nil
+	}
+	result, err := rawGetTorrentsTrackers(s.conn)
 	if err != nil {
 		log.Printf("Tracker RPC: fetch failed: %v", err)
 		return nil
 	}
-
 	return result
 }
 

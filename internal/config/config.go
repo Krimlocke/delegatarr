@@ -168,6 +168,9 @@ func ApplyTimezone(tz string) {
 //
 // activeDomains should be the set of tracker domains currently reported by Deluge.
 // Returns true if any migrations were performed.
+//
+// Callers must hold engine.ConfigLock before calling — this function both reads
+// and writes groups.json.
 func MigrateGroups(activeDomains []string) bool {
 	groups := LoadGroups()
 	if len(groups) == 0 || len(activeDomains) == 0 {
@@ -179,7 +182,7 @@ func MigrateGroups(activeDomains []string) bool {
 		if _, exists := groups[domain]; exists {
 			continue // already tagged under the Go-style domain
 		}
-		// Check if any existing key is a longer version of this domain
+		// Check if any existing key is a longer version of this domain.
 		// e.g. "sync.td-peers.com" ends with ".td-peers.com" or equals "td-peers.com"
 		for oldKey, tag := range groups {
 			if oldKey == domain {
@@ -187,6 +190,9 @@ func MigrateGroups(activeDomains []string) bool {
 			}
 			if strings.HasSuffix(oldKey, "."+domain) || strings.HasSuffix(domain, "."+oldKey) {
 				groups[domain] = tag
+				// Remove the old key so rules bound to it don't silently stop
+				// matching — the engine uses the new Go-style domain going forward.
+				delete(groups, oldKey)
 				log.Printf("System: Migrated tracker tag '%s' from '%s' to '%s'", tag, oldKey, domain)
 				migrated = true
 				break
