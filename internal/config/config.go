@@ -90,9 +90,7 @@ func (r Rule) IsEnabled() bool {
 // Groups is a map of tracker domain -> tag name.
 type Groups map[string]string
 
-// --- File I/O (thread-safe via caller-provided locks) ---
-
-var fileMu sync.Mutex
+// --- File I/O (thread-safe via caller-provided engine.ConfigLock) ---
 
 // LoadJSON reads a JSON file into the target, returning the default on error.
 func LoadJSON(filepath string, target interface{}) error {
@@ -107,10 +105,8 @@ func LoadJSON(filepath string, target interface{}) error {
 }
 
 // SaveJSON atomically writes data to a JSON file via a temp file swap.
+// Callers must hold engine.ConfigLock to ensure serialised access.
 func SaveJSON(fpath string, data interface{}) error {
-	fileMu.Lock()
-	defer fileMu.Unlock()
-
 	tmp := fpath + ".tmp"
 	b, err := json.MarshalIndent(data, "", "    ")
 	if err != nil {
@@ -149,11 +145,17 @@ func LoadGroups() Groups {
 	return groups
 }
 
+// tzMu protects writes to time.Local so concurrent goroutines (e.g. the
+// scheduler calling time.Now()) don't observe a partially-written pointer.
+var tzMu sync.Mutex
+
 // ApplyTimezone sets the TZ environment variable and reloads the time package location.
 func ApplyTimezone(tz string) {
 	os.Setenv("TZ", tz)
 	if loc, err := time.LoadLocation(tz); err == nil {
+		tzMu.Lock()
 		time.Local = loc
+		tzMu.Unlock()
 		log.Printf("System: Timezone set to %s", tz)
 	} else {
 		log.Printf("System Error: Invalid timezone %q: %v", tz, err)
@@ -168,9 +170,6 @@ func ApplyTimezone(tz string) {
 //
 // activeDomains should be the set of tracker domains currently reported by Deluge.
 // Returns true if any migrations were performed.
-//
-// Callers must hold engine.ConfigLock before calling — this function both reads
-// and writes groups.json.
 func MigrateGroups(activeDomains []string) bool {
 	groups := LoadGroups()
 	if len(groups) == 0 || len(activeDomains) == 0 {
@@ -182,17 +181,15 @@ func MigrateGroups(activeDomains []string) bool {
 		if _, exists := groups[domain]; exists {
 			continue // already tagged under the Go-style domain
 		}
-		// Check if any existing key is a longer version of this domain.
-		// e.g. "sync.td-peers.com" ends with ".td-peers.com" or equals "td-peers.com"
+		// Check if any existing key is a longer (Python-style) subdomain of this
+		// active domain. e.g. oldKey "sync.td-peers.com" is a subdomain of "td-peers.com".
+		// Only migrate in this direction — never from short to long.
 		for oldKey, tag := range groups {
 			if oldKey == domain {
 				continue
 			}
-			if strings.HasSuffix(oldKey, "."+domain) || strings.HasSuffix(domain, "."+oldKey) {
+			if strings.HasSuffix(oldKey, "."+domain) {
 				groups[domain] = tag
-				// Remove the old key so rules bound to it don't silently stop
-				// matching — the engine uses the new Go-style domain going forward.
-				delete(groups, oldKey)
 				log.Printf("System: Migrated tracker tag '%s' from '%s' to '%s'", tag, oldKey, domain)
 				migrated = true
 				break

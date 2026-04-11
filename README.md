@@ -14,7 +14,7 @@ Delegatarr connects to your Deluge daemon over RPC and continuously evaluates to
 - Tracker status patterns (e.g. `unregistered torrent`)
 - AND/OR logic to combine conditions
 
-**Stay safe** — Minimum keep thresholds prevent over-pruning. Dry run mode logs what *would* happen without touching anything. Enable/disable rules individually or in bulk.
+**Stay safe** — Minimum keep thresholds prevent over-pruning. Dry run mode logs what *would* happen without touching anything. Enable/disable rules individually or in bulk. Template rendering is buffered to prevent partial page delivery on errors.
 
 ## Features
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,8 +26,7 @@ import (
 )
 
 var (
-	templates *template.Template
-	apiToken  string
+	apiToken string
 
 	// RescheduleFunc is set by main to allow routes to reschedule the background job.
 	RescheduleFunc func(minutes int) error
@@ -179,7 +179,7 @@ type DashTrackerStat struct {
 func setFlash(w http.ResponseWriter, category, message string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "flash",
-		Value:    category + "|" + message,
+		Value:    url.QueryEscape(category + "|" + message),
 		Path:     "/",
 		MaxAge:   5,
 		HttpOnly: true,
@@ -193,7 +193,11 @@ func getFlash(w http.ResponseWriter, r *http.Request) []flashMsg {
 	}
 	// clear it
 	http.SetCookie(w, &http.Cookie{Name: "flash", Path: "/", MaxAge: -1})
-	parts := strings.SplitN(cookie.Value, "|", 2)
+	decoded, err := url.QueryUnescape(cookie.Value)
+	if err != nil {
+		return nil
+	}
+	parts := strings.SplitN(decoded, "|", 2)
 	if len(parts) == 2 {
 		return []flashMsg{{Category: parts[0], Message: parts[1]}}
 	}
@@ -216,7 +220,6 @@ func renderPage(w http.ResponseWriter, r *http.Request, tmplName string, data *p
 		http.Error(w, "Internal Server Error", 500)
 		return
 	}
-
 	// Render into a buffer first so that a template error mid-execution does not
 	// send a partial HTML response to the client before we can write the 500.
 	var buf bytes.Buffer
@@ -561,7 +564,7 @@ func saveSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 
 	newInterval := 15
-	if v, err := strconv.Atoi(r.FormValue("run_interval")); err == nil && v >= 1 {
+	if v, err := strconv.Atoi(r.FormValue("run_interval")); err == nil && v >= 1 && v <= 1440 {
 		newInterval = v
 	}
 
@@ -579,14 +582,15 @@ func saveSettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 	dryRun := r.FormValue("dry_run") != ""
 
-	s := config.Settings{
-		RunInterval: newInterval,
-		Timezone:    newTZ,
-		TrackerMode: trackerMode,
-		DryRun:      dryRun,
-	}
-
+	// Load existing settings first to preserve notification fields that are
+	// managed by the separate saveNotificationsHandler.
 	engine.ConfigLock.Lock()
+	s := config.GetSettings()
+	s.RunInterval = newInterval
+	s.Timezone = newTZ
+	s.TrackerMode = trackerMode
+	s.DryRun = dryRun
+
 	if err := config.SaveJSON(config.SettingsFile, s); err != nil {
 		engine.ConfigLock.Unlock()
 		log.Printf("Failed to save settings: %v", err)
@@ -661,7 +665,11 @@ func testWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send a test notification directly (does not require saving settings)
-	notify.SendTestNotification(url, webhookType)
+	if err := notify.SendTestNotification(url, webhookType); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
@@ -747,13 +755,13 @@ func importSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("System: Full backup imported successfully.")
 
 	// Apply the imported timezone to the running process immediately.
-	s := config.GetSettings()
-	if s.Timezone != "" {
-		config.ApplyTimezone(s.Timezone)
+	importedSettings := config.GetSettings()
+	if importedSettings.Timezone != "" {
+		config.ApplyTimezone(importedSettings.Timezone)
 	}
 
 	if RescheduleFunc != nil {
-		if err := RescheduleFunc(s.RunInterval); err != nil {
+		if err := RescheduleFunc(importedSettings.RunInterval); err != nil {
 			log.Printf("Failed to reschedule job after import: %v", err)
 			setFlash(w, "warning", "Backup imported, but scheduler could not be updated. Restart may be required.")
 		} else {
@@ -767,13 +775,22 @@ func importSettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 func factoryResetSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	engine.ConfigLock.Lock()
-	config.SaveJSON(config.SettingsFile, config.DefaultSettings())
+	if err := config.SaveJSON(config.SettingsFile, config.DefaultSettings()); err != nil {
+		engine.ConfigLock.Unlock()
+		log.Printf("Failed to save default settings during reset: %v", err)
+		setFlash(w, "error", "Factory reset failed.")
+		http.Redirect(w, r, "/settings", http.StatusFound)
+		return
+	}
 	engine.ConfigLock.Unlock()
 
 	if RescheduleFunc != nil {
-		RescheduleFunc(15)
+		if err := RescheduleFunc(15); err != nil {
+			log.Printf("Failed to reschedule after settings reset: %v", err)
+		}
 	}
 
+	config.ApplyTimezone("UTC")
 	log.Println("System: Factory reset performed on application settings only.")
 	setFlash(w, "warning", "Settings reset to defaults. Rules and tags were not affected.")
 	http.Redirect(w, r, "/settings", http.StatusFound)
@@ -781,15 +798,32 @@ func factoryResetSettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 func factoryResetAllHandler(w http.ResponseWriter, r *http.Request) {
 	engine.ConfigLock.Lock()
-	config.SaveJSON(config.SettingsFile, config.DefaultSettings())
-	config.SaveJSON(config.RulesFile, []config.Rule{})
-	config.SaveJSON(config.GroupsFile, config.Groups{})
+	var resetErr error
+	if err := config.SaveJSON(config.SettingsFile, config.DefaultSettings()); err != nil {
+		resetErr = err
+	}
+	if err := config.SaveJSON(config.RulesFile, []config.Rule{}); err != nil {
+		resetErr = err
+	}
+	if err := config.SaveJSON(config.GroupsFile, config.Groups{}); err != nil {
+		resetErr = err
+	}
 	engine.ConfigLock.Unlock()
 
-	if RescheduleFunc != nil {
-		RescheduleFunc(15)
+	if resetErr != nil {
+		log.Printf("Error during full factory reset: %v", resetErr)
+		setFlash(w, "error", "Factory reset encountered errors. Some files may not have been reset.")
+		http.Redirect(w, r, "/settings", http.StatusFound)
+		return
 	}
 
+	if RescheduleFunc != nil {
+		if err := RescheduleFunc(15); err != nil {
+			log.Printf("Failed to reschedule after full reset: %v", err)
+		}
+	}
+
+	config.ApplyTimezone("UTC")
 	log.Printf("System: CRITICAL - Full factory reset performed. All settings, rules, and tags have been wiped.")
 	setFlash(w, "error", "Full factory reset complete. All settings, rules, and tags have been wiped.")
 	http.Redirect(w, r, "/settings", http.StatusFound)

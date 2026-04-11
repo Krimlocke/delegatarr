@@ -18,8 +18,6 @@ var (
 
 	// lastNotifiedUntagged tracks which untagged trackers we already notified about
 	// so we don't spam on every engine run.
-	// Protected by notifyMu — do not read/write without holding it.
-	notifyMu             sync.Mutex
 	lastNotifiedUntagged string
 )
 
@@ -44,15 +42,8 @@ func GetDashboardData() (TrackerSummary, []string) {
 	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
 	labelMap := deluge.FetchLabels(c)
 
-	// Open one raw session for tracker URL fetching to avoid a second TLS dial.
-	rawSession, rawErr := deluge.OpenRawSession()
-	if rawErr != nil {
-		log.Printf("Deluge Warning: could not open raw session for tracker URLs: %v", rawErr)
-	}
-	defer rawSession.Close()
-
 	// Fetch full tracker URLs via raw RPC (nil if unavailable — falls back to TrackerHost)
-	fullTrackers := deluge.FetchTrackerURLsSession(rawSession)
+	fullTrackers := deluge.FetchTrackerURLs()
 
 	settings := config.GetSettings()
 	trackerMode := settings.TrackerMode
@@ -88,8 +79,7 @@ func GetDashboardData() (TrackerSummary, []string) {
 	}
 	sort.Strings(labels)
 
-	// Migrate Python-style tracker domains to Go-style if needed.
-	// ConfigLock is required because MigrateGroups reads and writes groups.json.
+	// Migrate Python-style tracker domains to Go-style if needed
 	activeDomains := make([]string, 0, len(summary))
 	for domain := range summary {
 		activeDomains = append(activeDomains, domain)
@@ -151,15 +141,8 @@ func ProcessTorrents(runType string) {
 	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
 	labelMap := deluge.FetchLabels(c)
 
-	// Open one raw session for tracker URL fetching to avoid a second TLS dial.
-	rawSession, rawErr := deluge.OpenRawSession()
-	if rawErr != nil {
-		log.Printf("Deluge Warning: could not open raw session for tracker URLs: %v", rawErr)
-	}
-	defer rawSession.Close()
-
 	// Fetch full tracker URLs via raw RPC (nil if unavailable — falls back to TrackerHost)
-	fullTrackers := deluge.FetchTrackerURLsSession(rawSession)
+	fullTrackers := deluge.FetchTrackerURLs()
 
 	// Detect untagged trackers and notify
 	if settings.NotifyUntagged && settings.WebhookURL != "" {
@@ -183,19 +166,12 @@ func ProcessTorrents(runType string) {
 			}
 			sort.Strings(untagged)
 			fingerprint := strings.Join(untagged, ",")
-			notifyMu.Lock()
-			shouldNotify := fingerprint != lastNotifiedUntagged
-			if shouldNotify {
+			if fingerprint != lastNotifiedUntagged {
 				lastNotifiedUntagged = fingerprint
-			}
-			notifyMu.Unlock()
-			if shouldNotify {
 				notify.SendUntaggedTrackerNotification(untagged)
 			}
 		} else {
-			notifyMu.Lock()
 			lastNotifiedUntagged = ""
-			notifyMu.Unlock()
 		}
 	}
 
@@ -307,12 +283,7 @@ func ProcessTorrents(runType string) {
 			continue
 		}
 
-		// Sort so that removal candidates end up at the tail (matching[minTorrents:]).
-		// Protected torrents (the ones we want to keep) go at the head.
-		//   oldest_added: newest kept → oldest removed; sort descending by TimeAdded (largest = newest at head)
-		//   newest_added: oldest kept → newest removed; sort ascending by TimeAdded (smallest = oldest at head)
-		//   longest_seeding: shortest kept → longest removed; sort ascending by SeedingHours
-		//   shortest_seeding: longest kept → shortest removed; sort descending by SeedingHours
+		// Sort: protected torrents first, removal candidates at the tail.
 		switch sortOrder {
 		case "oldest_added":
 			sort.Slice(matching, func(i, j int) bool { return matching[i].TimeAdded > matching[j].TimeAdded })
@@ -451,12 +422,16 @@ func ProcessTorrents(runType string) {
 // --- helpers ---
 
 func extractDomain(rawURL string) string {
+	host := rawURL
 	if idx := strings.Index(rawURL, "//"); idx >= 0 {
-		rest := rawURL[idx+2:]
-		if slashIdx := strings.Index(rest, "/"); slashIdx >= 0 {
-			return rest[:slashIdx]
+		host = rawURL[idx+2:]
+		if slashIdx := strings.Index(host, "/"); slashIdx >= 0 {
+			host = host[:slashIdx]
 		}
-		return rest
 	}
-	return rawURL
+	// Strip port number (e.g. "tracker.example.com:2710" -> "tracker.example.com")
+	if colonIdx := strings.LastIndex(host, ":"); colonIdx >= 0 {
+		host = host[:colonIdx]
+	}
+	return host
 }
