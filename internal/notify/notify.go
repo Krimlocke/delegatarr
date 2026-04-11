@@ -40,7 +40,10 @@ func SendRemovalNotification(entries []RemovalEntry, isDryRun bool) {
 	}
 
 	body := strings.Join(lines, "\n")
-	go send(settings.WebhookURL, settings.WebhookType, title, body, 0xEF4444) // red
+	go func() {
+		// Fire-and-forget: errors are logged by send() internally
+		send(settings.WebhookURL, settings.WebhookType, title, body, 0xEF4444) // red
+	}()
 }
 
 // SendUntaggedTrackerNotification fires a webhook when new untagged trackers are detected.
@@ -61,7 +64,10 @@ func SendUntaggedTrackerNotification(trackers []string) {
 	}
 
 	body := strings.Join(lines, "\n")
-	go send(settings.WebhookURL, settings.WebhookType, title, body, 0xF59E0B) // amber
+	go func() {
+		// Fire-and-forget: errors are logged by send() internally
+		send(settings.WebhookURL, settings.WebhookType, title, body, 0xF59E0B) // amber
+	}()
 }
 
 // RemovalEntry holds info about a removed torrent for notification purposes.
@@ -72,13 +78,14 @@ type RemovalEntry struct {
 }
 
 // SendTestNotification sends a test webhook to verify the configuration.
-func SendTestNotification(webhookURL, webhookType string) {
+// Returns an error if the send fails, so the caller can surface it to the UI.
+func SendTestNotification(webhookURL, webhookType string) error {
 	title := "[TEST] Delegatarr webhook is working!"
 	body := "This is a test notification from Delegatarr.\n• **Test.Torrent.1080p** (Tag: test-tag, State: Seeding)"
-	send(webhookURL, webhookType, title, body, 0x6366F1) // indigo/accent
+	return send(webhookURL, webhookType, title, body, 0x6366F1) // indigo/accent
 }
 
-func send(webhookURL, webhookType, title, body string, color int) {
+func send(webhookURL, webhookType, title, body string, color int) error {
 	var payload []byte
 	var err error
 
@@ -119,20 +126,21 @@ func send(webhookURL, webhookType, title, body string, color int) {
 
 	if err != nil {
 		log.Printf("Webhook Error: failed to marshal payload: %v", err)
-		return
+		return fmt.Errorf("failed to build payload: %w", err)
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(webhookURL, "application/json", bytes.NewReader(payload))
 	if err != nil {
 		log.Printf("Webhook Error: failed to send: %v", err)
-		return
+		return fmt.Errorf("failed to send: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
 		log.Printf("Webhook Warning: received status %d from webhook URL", resp.StatusCode)
-	} else {
-		log.Printf("Webhook: notification sent successfully (%s)", title)
+		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 	}
+	log.Printf("Webhook: notification sent successfully (%s)", title)
+	return nil
 }
