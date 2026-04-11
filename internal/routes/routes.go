@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -215,11 +216,17 @@ func renderPage(w http.ResponseWriter, r *http.Request, tmplName string, data *p
 		http.Error(w, "Internal Server Error", 500)
 		return
 	}
-	// Execute the page template by its filename — ParseFiles uses the filename as the template name
-	if err := t.ExecuteTemplate(w, tmplName, data); err != nil {
+
+	// Render into a buffer first so that a template error mid-execution does not
+	// send a partial HTML response to the client before we can write the 500.
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, tmplName, data); err != nil {
 		log.Printf("Template render error: %v", err)
 		http.Error(w, "Internal Server Error", 500)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	buf.WriteTo(w)
 }
 
 // --- Handlers ---
@@ -739,11 +746,22 @@ func importSettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("System: Full backup imported successfully.")
 
-	if RescheduleFunc != nil {
-		s := config.GetSettings()
-		RescheduleFunc(s.RunInterval)
+	// Apply the imported timezone to the running process immediately.
+	s := config.GetSettings()
+	if s.Timezone != "" {
+		config.ApplyTimezone(s.Timezone)
 	}
-	setFlash(w, "success", "Backup imported successfully.")
+
+	if RescheduleFunc != nil {
+		if err := RescheduleFunc(s.RunInterval); err != nil {
+			log.Printf("Failed to reschedule job after import: %v", err)
+			setFlash(w, "warning", "Backup imported, but scheduler could not be updated. Restart may be required.")
+		} else {
+			setFlash(w, "success", "Backup imported successfully.")
+		}
+	} else {
+		setFlash(w, "success", "Backup imported successfully.")
+	}
 	http.Redirect(w, r, "/settings", http.StatusFound)
 }
 
