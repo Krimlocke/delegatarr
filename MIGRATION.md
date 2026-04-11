@@ -130,6 +130,32 @@ The Recent Activity feed shows the last 8 events with deduplication — consecut
 
 A separate "Last N Removed" card appears below the activity feed when removals exist, showing up to 10 of the most recent torrent removals with full detail. This replaces the previous "Removals only" toggle filter.
 
+### 18. Code Audit Fixes (Post-Migration Hardening)
+A full code review identified and fixed the following issues:
+
+**Critical fixes:**
+- `renderPage` now renders templates into a `bytes.Buffer` before writing to the HTTP response, preventing partial HTML on template errors
+- `saveSettingsHandler` now loads existing settings before overlaying form values, preserving webhook/notification fields that were previously silently wiped on every settings save
+- Removed the internal `fileMu` mutex from `SaveJSON` — all callers already hold `engine.ConfigLock`, and the redundant lock created deadlock risk. `MigrateGroups` call site in `GetDashboardData` now wraps with `ConfigLock`
+
+**High-priority fixes:**
+- `importSettingsHandler` now calls `config.ApplyTimezone()` after import so the running process uses the imported timezone immediately
+- `extractDomain` now strips port numbers from tracker URLs (e.g. `tracker.example.com:2710` → `tracker.example.com`) so group lookups match correctly
+- `ApplyTimezone` now protects the `time.Local` write with a `sync.Mutex` to prevent data races with concurrent goroutines
+- Factory reset handlers now check `RescheduleFunc` and `SaveJSON` error returns and apply timezone reset to UTC
+
+**Medium-priority fixes:**
+- `MigrateGroups` suffix matching is now unidirectional — only migrates from longer Python-style keys to shorter Go-style keys, preventing incorrect cross-merges
+- Flash cookie values are now URL-encoded/decoded to handle special characters safely
+- `saveSettingsHandler` now enforces the same `run_interval` upper bound (1440) as `importSettingsHandler`
+
+**Low-priority cleanup:**
+- `setupLogging` no longer has duplicate `log.SetFlags`/`log.SetOutput` calls
+- `SendTestNotification` now returns an error so `testWebhookHandler` can surface failures in the JSON response
+- Removed dead `downloadDefaultLogo` function and its goroutine launch
+- Removed unused `templates *template.Template` variable from routes package
+- Background webhook goroutines now use explicit closures instead of bare `go send(...)` calls
+
 ## Known Limitations
 
 ### Log Rotation

@@ -34,9 +34,6 @@ func main() {
 		config.ApplyTimezone(tz)
 	}
 
-	// --- Download logo in background ---
-	go downloadDefaultLogo()
-
 	// --- Wait for Deluge ---
 	log.Println("System: Starting pre-flight checks. Waiting for Deluge connection (This may take up to 60s)...")
 	deluge.WaitForDeluge(12, 5)
@@ -120,14 +117,10 @@ func setupLogging() {
 		log.Printf("Warning: could not open log file: %v", err)
 		return
 	}
-	// Write to both console and file
+	// Write to both console and file via a custom writer that prepends timestamps
 	multi := io.MultiWriter(os.Stdout, logFile)
-	log.SetOutput(multi)
-	log.SetFlags(0) // we format ourselves
-	log.SetPrefix("")
-
-	// Use a custom format matching the Python version
 	log.SetFlags(0)
+	log.SetPrefix("")
 	log.SetOutput(&logWriter{out: multi})
 }
 
@@ -158,11 +151,4 @@ func getOrCreateSecretKey() []byte {
 		log.Printf("Warning: could not persist secret key to %s: %v", config.SecretKeyFile, err)
 	}
 	return key
-}
-
-func downloadDefaultLogo() {
-	if _, err := os.Stat(config.LogoFile); err == nil {
-		return // already exists
-	}
-	log.Println("System: Logo missing. A default logo should be placed at", config.LogoFile)
 }
