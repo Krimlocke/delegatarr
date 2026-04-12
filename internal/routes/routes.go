@@ -31,6 +31,9 @@ var (
 	// RescheduleFunc is set by main to allow routes to reschedule the background job.
 	RescheduleFunc func(minutes int) error
 
+	// NextRunFunc is set by main to allow routes to query the next scheduled run time.
+	NextRunFunc func() time.Time
+
 	safeReturnURLs = map[string]bool{
 		"/dashboard": true,
 		"/trackers":  true,
@@ -147,6 +150,9 @@ type pageData struct {
 	DashLastRun        string
 	DashNextRun        string
 	DashInterval       int
+	DashDownloadRate   string
+	DashUploadRate     string
+	DashStateStats     []DashStateStat
 }
 
 type flashMsg struct {
@@ -173,6 +179,13 @@ type DashTrackerStat struct {
 	Name    string
 	Count   int
 	Percent int
+}
+
+type DashStateStat struct {
+	State   string
+	Count   int
+	Percent int
+	Color   string
 }
 
 // flash message support via cookies (simple approach)
@@ -239,7 +252,8 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
-	summary, _ := engine.GetDashboardData()
+	dashData := engine.GetDashboardData()
+	summary := dashData.Trackers
 	settings := config.GetSettings()
 
 	engine.ConfigLock.Lock()
@@ -324,9 +338,6 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 				rest := line[nameStart+10:]
 				if nameEnd := strings.Index(rest, "'"); nameEnd >= 0 {
 					name = rest[:nameEnd]
-					if len(name) > 45 {
-						name = name[:42] + "..."
-					}
 				}
 			}
 			if name == "" {
@@ -334,9 +345,6 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 					rest := line[nameStart+10:]
 					if nameEnd := strings.Index(rest, "'"); nameEnd >= 0 {
 						name = rest[:nameEnd]
-						if len(name) > 45 {
-							name = name[:42] + "..."
-						}
 					}
 				}
 			}
@@ -477,6 +485,56 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		interval = 15
 	}
 
+	// Next run countdown
+	nextRun := ""
+	if NextRunFunc != nil {
+		nextTime := NextRunFunc()
+		if !nextTime.IsZero() {
+			remaining := time.Until(nextTime)
+			if remaining < 0 {
+				remaining = 0
+			}
+			nextRun = formatDuration(remaining)
+		}
+	}
+
+	// Transfer rates
+	dlRate, ulRate := "", ""
+	if dashData.Session != nil {
+		dlRate = formatBytes(dashData.Session.DownloadRate)
+		ulRate = formatBytes(dashData.Session.UploadRate)
+	}
+
+	// State breakdown
+	var stateStats []DashStateStat
+	maxState := 0
+	for _, count := range dashData.States {
+		if count > maxState {
+			maxState = count
+		}
+	}
+	stateColors := map[string]string{
+		"Seeding":      "success",
+		"Downloading":  "accent",
+		"Paused":       "warning",
+		"Checking":     "muted",
+		"Error":        "danger",
+		"Queued":       "muted",
+		"Moving":       "muted",
+	}
+	for state, count := range dashData.States {
+		pct := 0
+		if maxState > 0 {
+			pct = (count * 100) / maxState
+		}
+		color := stateColors[state]
+		if color == "" {
+			color = "muted"
+		}
+		stateStats = append(stateStats, DashStateStat{State: state, Count: count, Percent: pct, Color: color})
+	}
+	sort.Slice(stateStats, func(i, j int) bool { return stateStats[i].Count > stateStats[j].Count })
+
 	renderPage(w, r, "dashboard.html", &pageData{
 		ActivePage:        "dashboard",
 		PageTitle:         "Dashboard",
@@ -492,11 +550,15 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		DashTrackerStats:  trackerStats,
 		DashUptime:        uptime,
 		DashInterval:      interval,
+		DashNextRun:       nextRun,
+		DashDownloadRate:  dlRate,
+		DashUploadRate:    ulRate,
+		DashStateStats:    stateStats,
 	})
 }
 
 func trackersHandler(w http.ResponseWriter, r *http.Request) {
-	summary, _ := engine.GetDashboardData()
+	dashData := engine.GetDashboardData()
 	engine.ConfigLock.Lock()
 	groups := config.LoadGroups()
 	engine.ConfigLock.Unlock()
@@ -504,13 +566,14 @@ func trackersHandler(w http.ResponseWriter, r *http.Request) {
 	renderPage(w, r, "trackers.html", &pageData{
 		ActivePage:     "trackers",
 		PageTitle:      "Tracker Configuration",
-		TrackerSummary: summary,
+		TrackerSummary: dashData.Trackers,
 		Groups:         groups,
 	})
 }
 
 func rulesHandler(w http.ResponseWriter, r *http.Request) {
-	_, uniqueLabels := engine.GetDashboardData()
+	dashData := engine.GetDashboardData()
+	uniqueLabels := dashData.Labels
 	engine.ConfigLock.Lock()
 	groups := config.LoadGroups()
 	rulesList := config.LoadRules()
@@ -1297,4 +1360,18 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	}
 	return fmt.Sprintf("%dm", minutes)
+}
+
+// formatBytes formats bytes per second into a human-readable rate string.
+func formatBytes(bps float64) string {
+	switch {
+	case bps >= 1024*1024*1024:
+		return fmt.Sprintf("%.1f GB/s", bps/(1024*1024*1024))
+	case bps >= 1024*1024:
+		return fmt.Sprintf("%.1f MB/s", bps/(1024*1024))
+	case bps >= 1024:
+		return fmt.Sprintf("%.1f KB/s", bps/1024)
+	default:
+		return fmt.Sprintf("%.0f B/s", bps)
+	}
 }

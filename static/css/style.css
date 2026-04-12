@@ -427,6 +427,7 @@ option { background-color: var(--bg-main); color: var(--text-main); }
     color: var(--text-main);
     line-height: 1.4;
     font-weight: 500;
+    word-break: break-word;
 }
 .dash-feed-detail {
     font-size: 11px;
@@ -463,6 +464,21 @@ option { background-color: var(--bg-main); color: var(--text-main); }
     border-radius: 3px;
     min-width: 4px;
 }
+.dash-bar-success { background: var(--success); }
+.dash-bar-warning { background: var(--warning); }
+.dash-bar-danger { background: var(--danger); }
+.dash-bar-accent { background: var(--accent); }
+.dash-bar-muted { background: var(--text-muted); }
+.dash-state-name {
+    font-size: 13px;
+    font-weight: 500;
+    min-width: 90px;
+}
+.dash-state-success { color: var(--success); }
+.dash-state-warning { color: var(--warning); }
+.dash-state-danger { color: var(--danger); }
+.dash-state-accent { color: var(--accent); }
+.dash-state-muted { color: var(--text-muted); }
 .dash-engine-rows {
     display: flex;
     flex-direction: column;

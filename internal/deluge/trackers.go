@@ -78,6 +78,108 @@ func FetchTrackerURLsSession(s *RawSession) map[string][]string {
 	return result
 }
 
+// SessionStatus holds Deluge session transfer rates.
+type SessionStatus struct {
+	DownloadRate float64 // bytes per second
+	UploadRate   float64 // bytes per second
+}
+
+// FetchSessionStatus returns current Deluge transfer rates via raw RPC.
+// Returns nil on any error (non-fatal).
+func FetchSessionStatus() *SessionStatus {
+	s, err := OpenRawSession()
+	if err != nil {
+		log.Printf("Session RPC: connection failed: %v", err)
+		return nil
+	}
+	if s == nil {
+		return nil
+	}
+	defer s.Close()
+	return FetchSessionStatusSession(s)
+}
+
+// FetchSessionStatusSession fetches session status using an already-open RawSession.
+func FetchSessionStatusSession(s *RawSession) *SessionStatus {
+	if s == nil {
+		return nil
+	}
+	keys := rencode.NewList("payload_download_rate", "payload_upload_rate")
+	args := rencode.NewList(keys)
+
+	resp, err := s.conn.call("core.get_session_status", args, rencode.Dictionary{})
+	if err != nil {
+		log.Printf("Session RPC: fetch failed: %v", err)
+		return nil
+	}
+
+	if resp.Length() == 0 {
+		return nil
+	}
+
+	values := resp.Values()
+	if len(values) == 0 {
+		return nil
+	}
+
+	dict, ok := values[0].(rencode.Dictionary)
+	if !ok {
+		// Try list-of-pairs fallback (same pattern as tracker fetch)
+		if asList, ok := values[0].(rencode.List); ok {
+			dict = rencode.Dictionary{}
+			listVals := asList.Values()
+			for i := 0; i+1 < len(listVals); i += 2 {
+				dict.Add(listVals[i], listVals[i+1])
+			}
+		} else {
+			return nil
+		}
+	}
+
+	status := &SessionStatus{}
+	for _, pair := range dict.Values() {
+		kv, ok := pair.(rencode.List)
+		if !ok {
+			continue
+		}
+		kvValues := kv.Values()
+		if len(kvValues) < 2 {
+			continue
+		}
+		var key string
+		switch k := kvValues[0].(type) {
+		case []byte:
+			key = string(k)
+		case string:
+			key = k
+		default:
+			continue
+		}
+		var val float64
+		switch v := kvValues[1].(type) {
+		case float64:
+			val = v
+		case float32:
+			val = float64(v)
+		case int64:
+			val = float64(v)
+		case int32:
+			val = float64(v)
+		case int8:
+			val = float64(v)
+		case int:
+			val = float64(v)
+		}
+		switch key {
+		case "payload_download_rate":
+			status.DownloadRate = val
+		case "payload_upload_rate":
+			status.UploadRate = val
+		}
+	}
+	return status
+}
+
 // rawConn wraps a TLS connection with the Deluge v2 RPC protocol.
 type rawConn struct {
 	tls    *tls.Conn
