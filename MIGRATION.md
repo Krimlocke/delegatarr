@@ -156,6 +156,18 @@ A full code review identified and fixed the following issues:
 - Removed unused `templates *template.Template` variable from routes package
 - Background webhook goroutines now use explicit closures instead of bare `go send(...)` calls
 
+### 19. Dashboard Enhancements
+
+**Next run countdown**: The Engine status card now shows a "Next run" row with a countdown to the next scheduled engine run. `main.go` exposes the gocron job's `NextRun()` time via a new `routes.NextRunFunc` callback, following the same pattern as `RescheduleFunc`.
+
+**Deluge transfer speeds**: The Connection card displays live download/upload rates. A new `FetchSessionStatus()` function in `trackers.go` calls `core.get_session_status` via raw RPC to fetch `payload_download_rate` and `payload_upload_rate`. This reuses the existing raw RPC infrastructure and follows the same nil-on-error silent fallback pattern — if the call fails, the rates are simply not shown.
+
+**Torrent state breakdown**: A new "Torrent states" card shows a color-coded bar chart of torrent counts per state (Seeding, Downloading, Paused, etc.). State counts are gathered during the existing torrent iteration in `GetDashboardData()` with no additional RPC call.
+
+**GetDashboardData refactor**: The function now returns a `DashboardResult` struct instead of a two-value tuple `(TrackerSummary, []string)`. This cleanly bundles trackers, labels, state counts, and session status. All three callers (`dashboardHandler`, `trackersHandler`, `rulesHandler`) were updated.
+
+**UI polish**: Torrent name truncation removed (full names displayed with CSS `word-break` instead of Go-side `...` truncation). "Last N removed" card moved above "Recent activity" for better visibility.
+
 ## Known Limitations
 
 ### Log Rotation

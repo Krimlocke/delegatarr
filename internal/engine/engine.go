@@ -24,19 +24,31 @@ var (
 // TrackerSummary maps tracker domain -> torrent count.
 type TrackerSummary map[string]int
 
-// GetDashboardData retrieves active tracker domains and unique labels from Deluge.
-func GetDashboardData() (TrackerSummary, []string) {
+// StateCounts maps torrent state (Seeding, Downloading, Paused, etc.) -> count.
+type StateCounts map[string]int
+
+// DashboardResult holds all data returned by GetDashboardData.
+type DashboardResult struct {
+	Trackers TrackerSummary
+	Labels   []string
+	States   StateCounts
+	Session  *deluge.SessionStatus
+}
+
+// GetDashboardData retrieves active tracker domains, unique labels, state counts,
+// and session transfer rates from Deluge.
+func GetDashboardData() DashboardResult {
 	c, err := deluge.NewClient()
 	if err != nil {
 		log.Printf("Deluge Error: %v", err)
-		return TrackerSummary{}, nil
+		return DashboardResult{Trackers: TrackerSummary{}}
 	}
 	defer c.Close()
 
 	torrents, err := c.TorrentsStatus(deluge.StateUnspecified, nil)
 	if err != nil {
 		log.Printf("Deluge Error: %v", err)
-		return TrackerSummary{}, nil
+		return DashboardResult{Trackers: TrackerSummary{}}
 	}
 
 	// Fetch labels from the Label plugin (returns empty map if plugin disabled)
@@ -45,14 +57,23 @@ func GetDashboardData() (TrackerSummary, []string) {
 	// Fetch full tracker URLs via raw RPC (nil if unavailable — falls back to TrackerHost)
 	fullTrackers := deluge.FetchTrackerURLs()
 
+	// Fetch session transfer rates (nil if unavailable)
+	session := deluge.FetchSessionStatus()
+
 	settings := config.GetSettings()
 	trackerMode := settings.TrackerMode
 
 	summary := TrackerSummary{}
 	labelsSet := map[string]bool{}
+	states := StateCounts{}
 
 	for hash, ts := range torrents {
 		t := deluge.FromStatus(ts, labelMap[hash], deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
+
+		// Count states
+		if t.State != "" {
+			states[t.State]++
+		}
 
 		if t.Label != "" {
 			labelsSet[t.Label] = true
@@ -88,7 +109,12 @@ func GetDashboardData() (TrackerSummary, []string) {
 	config.MigrateGroups(activeDomains)
 	ConfigLock.Unlock()
 
-	return summary, labels
+	return DashboardResult{
+		Trackers: summary,
+		Labels:   labels,
+		States:   states,
+		Session:  session,
+	}
 }
 
 // torrentCandidate holds a torrent being evaluated for removal.
