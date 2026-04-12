@@ -25,6 +25,25 @@
 
 <div class="dash-cols">
     <div class="dash-left">
+        {{if .DashRecentRemovals}}
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Last {{len .DashRecentRemovals}} removed</h3>
+            </div>
+            <div class="dash-feed">
+                {{range .DashRecentRemovals}}
+                <div class="dash-feed-item">
+                    <div class="dash-feed-dot dash-feed-dot-{{.Color}}"></div>
+                    <div>
+                        <div class="dash-feed-text">{{.Text}}</div>
+                        <div class="dash-feed-detail">{{.Detail}}{{if .TimeAgo}} · {{.TimeAgo}}{{end}}</div>
+                    </div>
+                </div>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
+
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Recent activity</h3>
@@ -45,25 +64,6 @@
             <div style="text-align: center; color: var(--text-muted); padding: 30px;">No recent activity.</div>
             {{end}}
         </div>
-
-        {{if .DashRecentRemovals}}
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Last {{len .DashRecentRemovals}} removed</h3>
-            </div>
-            <div class="dash-feed">
-                {{range .DashRecentRemovals}}
-                <div class="dash-feed-item">
-                    <div class="dash-feed-dot dash-feed-dot-{{.Color}}"></div>
-                    <div>
-                        <div class="dash-feed-text">{{.Text}}</div>
-                        <div class="dash-feed-detail">{{.Detail}}{{if .TimeAgo}} · {{.TimeAgo}}{{end}}</div>
-                    </div>
-                </div>
-                {{end}}
-            </div>
-        </div>
-        {{end}}
 
         {{if .DashRuleStats}}
         <div class="card">
@@ -109,8 +109,33 @@
                     <span class="dash-engine-label">Uptime</span>
                     <span class="dash-engine-value">{{.DashUptime}}</span>
                 </div>
+                {{if .DashNextRun}}
+                <div class="dash-engine-row">
+                    <span class="dash-engine-label">Next run</span>
+                    <span class="dash-engine-value">in {{.DashNextRun}}</span>
+                </div>
+                {{end}}
             </div>
         </div>
+
+        {{if .DashStateStats}}
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Torrent states</h3>
+            </div>
+            <div class="dash-tracker-rows">
+                {{range .DashStateStats}}
+                <div class="dash-tracker-row">
+                    <span class="dash-state-name dash-state-{{.Color}}">{{.State}}</span>
+                    <div class="dash-bar-bg" style="flex: 1; margin: 0 12px;">
+                        <div class="dash-bar dash-bar-{{.Color}}" style="width: {{.Percent}}%;"></div>
+                    </div>
+                    <span class="dash-tracker-count">{{.Count}}</span>
+                </div>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
 
         {{if .DashTrackerStats}}
         <div class="card">
@@ -143,6 +168,18 @@
                         {{if .DelugeConnected}}<span style="color: var(--success); font-size: 13px; font-weight: 500;">Connected</span>{{else}}<span style="color: var(--danger); font-size: 13px; font-weight: 500;">Unreachable</span>{{end}}
                     </div>
                 </div>
+                {{if .DashDownloadRate}}
+                <div class="dash-engine-row">
+                    <span class="dash-engine-label">Download</span>
+                    <span class="dash-engine-value">↓ {{.DashDownloadRate}}</span>
+                </div>
+                {{end}}
+                {{if .DashUploadRate}}
+                <div class="dash-engine-row">
+                    <span class="dash-engine-label">Upload</span>
+                    <span class="dash-engine-value">↑ {{.DashUploadRate}}</span>
+                </div>
+                {{end}}
                 <div class="dash-engine-row">
                     <span class="dash-engine-label">Version</span>
                     <span style="font-size: 12px; color: var(--text-muted);">v{{.Version}}</span>
