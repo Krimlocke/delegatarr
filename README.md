@@ -18,8 +18,8 @@ Delegatarr connects to your Deluge daemon over RPC and continuously evaluates to
 
 ## Features
 
-- Web UI dashboard with activity feed, removal history, and tracker/rule stats
-- Background scheduler with configurable interval
+- Web UI dashboard with activity feed, removal history, tracker/rule stats, torrent state breakdown, and live transfer speeds
+- Background scheduler with configurable interval and next-run countdown
 - Multi-tracker support (primary only or all trackers per torrent)
 - Deluge label integration via the Label plugin
 - Webhook notifications (Discord, Slack, generic JSON) for removals and untagged trackers

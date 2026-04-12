@@ -73,6 +73,11 @@ func main() {
 
 	scheduler.StartAsync()
 
+	// Wire up next run query function so routes can display countdown
+	routes.NextRunFunc = func() time.Time {
+		return job.NextRun()
+	}
+
 	// Wire up reschedule function so routes can adjust the interval
 	routes.RescheduleFunc = func(minutes int) error {
 		scheduler.Remove(job)
