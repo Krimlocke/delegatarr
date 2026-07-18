@@ -22,7 +22,7 @@
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Deluge Label</label>
-					<input type="text" list="labelList" name="label" class="input-required" placeholder="e.g., seed" required autocomplete="off">
+					<input type="text" list="labelList" name="label" placeholder="e.g., seed (blank = all labels)" autocomplete="off">
 					<datalist id="labelList">{{range .UniqueLabels}}<option value="{{.}}">{{end}}</datalist>
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
@@ -165,7 +165,7 @@
                 <div class="rule-card-row">
                     <div class="rule-card-detail">
                         <span class="rule-card-label">Label</span>
-                        <span class="rule-card-value">{{$rule.Label}}</span>
+                        <span class="rule-card-value">{{if $rule.Label}}{{$rule.Label}}{{else}}<em style="color: var(--text-muted);">All labels</em>{{end}}</span>
                     </div>
                     <div class="rule-card-detail">
                         <span class="rule-card-label">State</span>

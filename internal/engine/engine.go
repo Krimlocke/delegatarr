@@ -278,7 +278,9 @@ func ProcessTorrents(runType string) {
 				}
 			}
 
-			if matchedGroup && strings.EqualFold(label, targetLabel) {
+			// An empty target label is a wildcard: the rule considers torrents of
+			// any label (including none). Otherwise the label must match.
+			if matchedGroup && (targetLabel == "" || strings.EqualFold(label, targetLabel)) {
 				var triggerValue float64
 				switch timeMetric {
 				case "time_added":

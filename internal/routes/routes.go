@@ -1264,9 +1264,8 @@ func validateRule(r config.Rule) string {
 	if r.GroupID == "" {
 		return "Target Tag cannot be empty."
 	}
-	if r.Label == "" {
-		return "Deluge Label cannot be empty."
-	}
+	// An empty Deluge Label is allowed and acts as a wildcard — the rule then
+	// considers torrents of any label (including none). See engine matching.
 	if r.ThresholdValue <= 0 && r.TrackerStatus == "" {
 		return "Threshold time must be greater than 0 (or set a Tracker Status condition)."
 	}
