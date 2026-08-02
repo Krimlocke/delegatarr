@@ -79,6 +79,15 @@ Rules evaluate torrents that match a specific **tag + label + state** filter. Re
 
 Conditions can be combined with AND/OR logic. Tracker status can also be used as the sole condition with no time or ratio requirement.
 
+**Min Keep** sets a floor on how many torrents survive, and you choose what it counts:
+
+| Scope | Counts |
+|-------|--------|
+| This rule's torrents only | Only torrents matching the rule's tag + label + state. Each rule keeps its own floor — several rules on one tag can still prune the tag well below it. |
+| All torrents with this tag | Every torrent carrying the tag, whatever its label or state. All rules on the tag protect the same torrents, so together they can't prune below the floor. |
+
+Protected torrents are the ones the rule's Removal Priority ranks last. Existing rules keep the rule-only scope.
+
 ## Building locally
 
 Requires Go 1.22+:

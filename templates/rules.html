@@ -86,7 +86,14 @@
 			<div class="form-row" style="align-items: flex-end;">
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Min Keep</label>
-					<input type="number" name="min_torrents" class="input-required" placeholder="Min Keep" value="0" required>
+					<input type="number" name="min_torrents" class="input-required" placeholder="Min Keep" value="0" min="0" required>
+				</div>
+				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1.5;">
+					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Min Keep Counts</label>
+					<select name="min_keep_scope" title="Which torrents count towards the Min Keep floor">
+						<option value="rule">This rule's torrents only</option>
+						<option value="group">All torrents with this tag</option>
+					</select>
 				</div>
 				<div style="display: flex; flex-direction: column; gap: 4px; flex: 1.5;">
 					<label style="font-size: 12px; color: var(--text-muted); font-weight: 500;">Removal Priority</label>
@@ -183,7 +190,7 @@
                     </div>
                     <div class="rule-card-detail">
                         <span class="rule-card-label">Min Keep</span>
-                        <span class="rule-card-value">{{$rule.MinTorrents}}</span>
+                        <span class="rule-card-value">{{$rule.MinTorrents}}{{if gt $rule.MinTorrents 0}} <span style="color: var(--text-muted); font-weight: 500; font-size: 12px;">{{if $rule.UsesGroupMinKeep}}across tag{{else}}this rule{{end}}</span>{{end}}</span>
                     </div>
                     <div class="rule-card-detail">
                         <span class="rule-card-label">Priority</span>
@@ -231,6 +238,7 @@ function editRule(index) {
             form.querySelector('[name="logic_operator"]').value = rule.logic_operator || 'OR';
             form.querySelector('[name="seed_ratio"]').value = rule.seed_ratio != null ? rule.seed_ratio : '';
             form.querySelector('[name="min_torrents"]').value = rule.min_torrents != null ? rule.min_torrents : 0;
+            form.querySelector('[name="min_keep_scope"]').value = rule.min_keep_scope === 'group' ? 'group' : 'rule';
             form.querySelector('[name="sort_order"]').value = rule.sort_order || 'oldest_added';
 
             const deleteToggle = document.getElementById('delete_data_toggle');

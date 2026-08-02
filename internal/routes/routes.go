@@ -1218,6 +1218,11 @@ func parseRuleForm(r *http.Request) config.Rule {
 		minTorrents = v
 	}
 
+	minKeepScope := config.MinKeepScopeRule
+	if r.FormValue("min_keep_scope") == config.MinKeepScopeGroup {
+		minKeepScope = config.MinKeepScopeGroup
+	}
+
 	var seedRatio *float64
 	if raw := strings.TrimSpace(r.FormValue("seed_ratio")); raw != "" {
 		if v, err := strconv.ParseFloat(raw, 64); err == nil {
@@ -1249,6 +1254,7 @@ func parseRuleForm(r *http.Request) config.Rule {
 		TargetState:    truncStr(r.FormValue("target_state"), 50),
 		TimeMetric:     truncStr(r.FormValue("time_metric"), 50),
 		MinTorrents:    minTorrents,
+		MinKeepScope:   minKeepScope,
 		SortOrder:      sortOrder,
 		ThresholdValue: thresholdVal,
 		ThresholdUnit:  truncStr(r.FormValue("threshold_unit"), 20),

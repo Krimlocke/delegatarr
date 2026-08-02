@@ -237,7 +237,13 @@ func ProcessTorrents(runType string) {
 		}
 
 		sortOrder := rule.SortOrder
+		groupScopedMinKeep := minTorrents > 0 && rule.UsesGroupMinKeep()
+
 		var matching []torrentCandidate
+		// groupPool holds every torrent carrying the rule's tag, before the
+		// label/state filters narrow it down. Only collected when Min Keep is
+		// counted across the whole tag.
+		var groupPool []torrentCandidate
 
 		for hash, ts := range torrents {
 			t := deluge.FromStatus(ts, labelMap[hash], deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
@@ -245,21 +251,6 @@ func ProcessTorrents(runType string) {
 			name := t.Name
 			label := t.Label
 			state := t.State
-
-			if targetState != "All" && state != targetState {
-				continue
-			}
-
-			seedingHours := float64(t.SeedingTime) / 3600.0
-			timeAdded := t.TimeAdded
-			activeHours := float64(t.ActiveTime) / 3600.0
-			ratio := t.Ratio
-
-			totalAgeHours := (currentTime - timeAdded) / 3600.0
-			pausedHours := totalAgeHours - activeHours
-			if pausedHours < 0 {
-				pausedHours = 0
-			}
 
 			trackerURLs := extractTrackerURLs(t)
 			if len(trackerURLs) == 0 {
@@ -277,30 +268,55 @@ func ProcessTorrents(runType string) {
 					break
 				}
 			}
+			if !matchedGroup {
+				continue
+			}
 
+			seedingHours := float64(t.SeedingTime) / 3600.0
+			timeAdded := t.TimeAdded
+			activeHours := float64(t.ActiveTime) / 3600.0
+			ratio := t.Ratio
+
+			totalAgeHours := (currentTime - timeAdded) / 3600.0
+			pausedHours := totalAgeHours - activeHours
+			if pausedHours < 0 {
+				pausedHours = 0
+			}
+
+			var triggerValue float64
+			switch timeMetric {
+			case "time_added":
+				triggerValue = totalAgeHours
+			case "time_paused":
+				triggerValue = pausedHours
+			default:
+				triggerValue = seedingHours
+			}
+
+			candidate := torrentCandidate{
+				ID:            hash,
+				Name:          name,
+				SeedingHours:  seedingHours,
+				TimeAdded:     timeAdded,
+				TriggerValue:  triggerValue,
+				Ratio:         ratio,
+				TrackerStatus: t.TrackerStatus,
+			}
+
+			if groupScopedMinKeep {
+				groupPool = append(groupPool, candidate)
+			}
+
+			if targetState != "All" && state != targetState {
+				continue
+			}
 			// An empty target label is a wildcard: the rule considers torrents of
 			// any label (including none). Otherwise the label must match.
-			if matchedGroup && (targetLabel == "" || strings.EqualFold(label, targetLabel)) {
-				var triggerValue float64
-				switch timeMetric {
-				case "time_added":
-					triggerValue = totalAgeHours
-				case "time_paused":
-					triggerValue = pausedHours
-				default:
-					triggerValue = seedingHours
-				}
-
-				matching = append(matching, torrentCandidate{
-					ID:            hash,
-					Name:          name,
-					SeedingHours:  seedingHours,
-					TimeAdded:     timeAdded,
-					TriggerValue:  triggerValue,
-					Ratio:         ratio,
-					TrackerStatus: t.TrackerStatus,
-				})
+			if targetLabel != "" && !strings.EqualFold(label, targetLabel) {
+				continue
 			}
+
+			matching = append(matching, candidate)
 		}
 
 		if len(matching) == 0 {
@@ -312,27 +328,47 @@ func ProcessTorrents(runType string) {
 		}
 
 		// Sort: protected torrents first, removal candidates at the tail.
-		switch sortOrder {
-		case "oldest_added":
-			sort.Slice(matching, func(i, j int) bool { return matching[i].TimeAdded > matching[j].TimeAdded })
-		case "newest_added":
-			sort.Slice(matching, func(i, j int) bool { return matching[i].TimeAdded < matching[j].TimeAdded })
-		case "longest_seeding":
-			sort.Slice(matching, func(i, j int) bool { return matching[i].SeedingHours < matching[j].SeedingHours })
-		case "shortest_seeding":
-			sort.Slice(matching, func(i, j int) bool { return matching[i].SeedingHours > matching[j].SeedingHours })
-		}
+		sortByRemovalPriority(matching, sortOrder)
 
 		// If a minimum-keep count is set, ensure we never drop below it.
 		// When the pool is at or below the minimum, skip this rule entirely.
 		candidates := matching
 		if minTorrents > 0 {
-			if len(matching) <= minTorrents {
-				log.Printf("%s Engine Run: Rule '%s' skipped — only %d torrent(s) matched, minimum keep is %d.",
-					runType, targetGroup, len(matching), minTorrents)
-				continue
+			if groupScopedMinKeep {
+				// Min Keep counts every torrent under the tag, so the protected
+				// set is chosen from the whole tag and then excluded from this
+				// rule's matches. Every rule on the tag protects the same
+				// torrents, so they can't collectively prune below the floor.
+				if len(groupPool) <= minTorrents {
+					log.Printf("%s Engine Run: Rule '%s' skipped — tag holds only %d torrent(s), minimum keep is %d (counted across the whole tag).",
+						runType, targetGroup, len(groupPool), minTorrents)
+					continue
+				}
+				sortByRemovalPriority(groupPool, sortOrder)
+				protected := make(map[string]bool, minTorrents)
+				for _, t := range groupPool[:minTorrents] {
+					protected[t.ID] = true
+				}
+				unprotected := make([]torrentCandidate, 0, len(matching))
+				for _, t := range matching {
+					if !protected[t.ID] {
+						unprotected = append(unprotected, t)
+					}
+				}
+				if len(unprotected) == 0 {
+					log.Printf("%s Engine Run: Rule '%s' skipped — all %d matched torrent(s) are within the minimum keep of %d (counted across the whole tag).",
+						runType, targetGroup, len(matching), minTorrents)
+					continue
+				}
+				candidates = unprotected
+			} else {
+				if len(matching) <= minTorrents {
+					log.Printf("%s Engine Run: Rule '%s' skipped — only %d torrent(s) matched, minimum keep is %d.",
+						runType, targetGroup, len(matching), minTorrents)
+					continue
+				}
+				candidates = matching[minTorrents:]
 			}
-			candidates = matching[minTorrents:]
 		}
 
 		ruleTrackerStatus := strings.ToLower(strings.TrimSpace(rule.TrackerStatus))
@@ -448,6 +484,21 @@ func ProcessTorrents(runType string) {
 }
 
 // --- helpers ---
+
+// sortByRemovalPriority orders candidates so protected torrents come first and
+// removal candidates sit at the tail.
+func sortByRemovalPriority(list []torrentCandidate, sortOrder string) {
+	switch sortOrder {
+	case "oldest_added":
+		sort.Slice(list, func(i, j int) bool { return list[i].TimeAdded > list[j].TimeAdded })
+	case "newest_added":
+		sort.Slice(list, func(i, j int) bool { return list[i].TimeAdded < list[j].TimeAdded })
+	case "longest_seeding":
+		sort.Slice(list, func(i, j int) bool { return list[i].SeedingHours < list[j].SeedingHours })
+	case "shortest_seeding":
+		sort.Slice(list, func(i, j int) bool { return list[i].SeedingHours > list[j].SeedingHours })
+	}
+}
 
 func extractDomain(rawURL string) string {
 	host := rawURL

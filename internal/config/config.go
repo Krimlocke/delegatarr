@@ -65,6 +65,16 @@ func DefaultSettings() Settings {
 	}
 }
 
+// Min keep scopes: how Rule.MinTorrents is counted.
+const (
+	// MinKeepScopeRule counts only the torrents this rule matches
+	// (tag + label + state). This is the default and the historic behaviour.
+	MinKeepScopeRule = "rule"
+	// MinKeepScopeGroup counts every torrent carrying the rule's tracker tag,
+	// ignoring the rule's label and state filters.
+	MinKeepScopeGroup = "group"
+)
+
 // Rule represents a single torrent removal rule.
 type Rule struct {
 	GroupID        string   `json:"group_id"`
@@ -72,6 +82,7 @@ type Rule struct {
 	TargetState    string   `json:"target_state"`
 	TimeMetric     string   `json:"time_metric"`
 	MinTorrents    int      `json:"min_torrents"`
+	MinKeepScope   string   `json:"min_keep_scope,omitempty"` // "rule" (default) or "group"
 	SortOrder      string   `json:"sort_order"`
 	ThresholdValue float64  `json:"threshold_value"`
 	ThresholdUnit  string   `json:"threshold_unit"`
@@ -85,6 +96,14 @@ type Rule struct {
 // IsEnabled returns whether the rule is active. Nil defaults to true.
 func (r Rule) IsEnabled() bool {
 	return r.Enabled == nil || *r.Enabled
+}
+
+// UsesGroupMinKeep reports whether Min Keep is counted across every torrent
+// carrying the rule's tracker tag rather than only the rule's own matches.
+// Rules saved before this setting existed have an empty scope and stay
+// rule-scoped.
+func (r Rule) UsesGroupMinKeep() bool {
+	return r.MinKeepScope == MinKeepScopeGroup
 }
 
 // Groups is a map of tracker domain -> tag name.
