@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -244,6 +245,9 @@ func ProcessTorrents(runType string) {
 		// label/state filters narrow it down. Only collected when Min Keep is
 		// counted across the whole tag.
 		var groupPool []torrentCandidate
+		// alreadyQueued counts torrents under this tag that an earlier rule in
+		// this run has already queued for removal.
+		alreadyQueued := 0
 
 		for hash, ts := range torrents {
 			t := deluge.FromStatus(ts, labelMap[hash], deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
@@ -269,6 +273,14 @@ func ProcessTorrents(runType string) {
 				}
 			}
 			if !matchedGroup {
+				continue
+			}
+
+			// A torrent an earlier rule already queued for removal is treated as
+			// gone: it counts towards neither pool, so this rule's Min Keep is
+			// measured against what will actually survive the run.
+			if seenIDs[hash] {
+				alreadyQueued++
 				continue
 			}
 
@@ -330,6 +342,13 @@ func ProcessTorrents(runType string) {
 		// Sort: protected torrents first, removal candidates at the tail.
 		sortByRemovalPriority(matching, sortOrder)
 
+		// Pool counts below exclude anything an earlier rule already claimed;
+		// say so in the logs, otherwise the numbers look wrong next to Deluge.
+		queuedNote := ""
+		if alreadyQueued > 0 {
+			queuedNote = fmt.Sprintf(" (%d already queued for removal earlier this run)", alreadyQueued)
+		}
+
 		// If a minimum-keep count is set, ensure we never drop below it.
 		// When the pool is at or below the minimum, skip this rule entirely.
 		candidates := matching
@@ -340,8 +359,8 @@ func ProcessTorrents(runType string) {
 				// rule's matches. Every rule on the tag protects the same
 				// torrents, so they can't collectively prune below the floor.
 				if len(groupPool) <= minTorrents {
-					log.Printf("%s Engine Run: Rule '%s' skipped — tag holds only %d torrent(s), minimum keep is %d (counted across the whole tag).",
-						runType, targetGroup, len(groupPool), minTorrents)
+					log.Printf("%s Engine Run: Rule '%s' skipped — tag holds only %d surviving torrent(s)%s, minimum keep is %d (counted across the whole tag).",
+						runType, targetGroup, len(groupPool), queuedNote, minTorrents)
 					continue
 				}
 				sortByRemovalPriority(groupPool, sortOrder)
@@ -363,8 +382,8 @@ func ProcessTorrents(runType string) {
 				candidates = unprotected
 			} else {
 				if len(matching) <= minTorrents {
-					log.Printf("%s Engine Run: Rule '%s' skipped — only %d torrent(s) matched, minimum keep is %d.",
-						runType, targetGroup, len(matching), minTorrents)
+					log.Printf("%s Engine Run: Rule '%s' skipped — only %d torrent(s) matched%s, minimum keep is %d.",
+						runType, targetGroup, len(matching), queuedNote, minTorrents)
 					continue
 				}
 				candidates = matching[minTorrents:]
@@ -379,9 +398,8 @@ func ProcessTorrents(runType string) {
 		}
 
 		for _, t := range candidates {
-			if seenIDs[t.ID] {
-				continue
-			}
+			// Torrents claimed by an earlier rule never reach here — they were
+			// filtered out while the pools were built.
 
 			// Tracker status condition: match if torrent's tracker status contains the rule's pattern
 			trackerStatusMet := false
