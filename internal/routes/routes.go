@@ -100,6 +100,7 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/factory_reset_settings", factoryResetSettingsHandler).Methods("POST")
 	r.HandleFunc("/factory_reset_all", factoryResetAllHandler).Methods("POST")
 	r.HandleFunc("/update_groups", updateGroupsHandler).Methods("POST")
+	r.HandleFunc("/update_floors", updateFloorsHandler).Methods("POST")
 	r.HandleFunc("/add_rule", addRuleHandler).Methods("POST")
 	r.HandleFunc("/edit_rule/{index:[0-9]+}", editRuleHandler).Methods("POST")
 	r.HandleFunc("/toggle_rule/{index:[0-9]+}", toggleRuleHandler).Methods("POST")
@@ -130,6 +131,7 @@ type pageData struct {
 	// Page-specific data
 	TrackerSummary engine.TrackerSummary
 	Groups         config.Groups
+	TagFloors      []tagFloor
 	RulesList      []config.Rule
 	UniqueTags     []string
 	UniqueLabels   []string
@@ -557,18 +559,94 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// tagFloor is one row of the tag floor table: a tag, what it currently holds,
+// and the floor set on it.
+type tagFloor struct {
+	Tag   string
+	Count int
+	Floor int
+}
+
 func trackersHandler(w http.ResponseWriter, r *http.Request) {
 	dashData := engine.GetDashboardData()
 	engine.ConfigLock.Lock()
 	groups := config.LoadGroups()
+	floors := config.LoadFloors()
 	engine.ConfigLock.Unlock()
+
+	// One row per distinct tag currently assigned to a tracker.
+	tagsSet := map[string]bool{}
+	for _, tag := range groups {
+		if strings.TrimSpace(tag) != "" {
+			tagsSet[tag] = true
+		}
+	}
+	tagNames := make([]string, 0, len(tagsSet))
+	for tag := range tagsSet {
+		tagNames = append(tagNames, tag)
+	}
+	sort.Strings(tagNames)
+
+	tagFloors := make([]tagFloor, 0, len(tagNames))
+	for _, tag := range tagNames {
+		tagFloors = append(tagFloors, tagFloor{
+			Tag:   tag,
+			Count: dashData.Tags[tag],
+			Floor: floors[tag],
+		})
+	}
 
 	renderPage(w, r, "trackers.html", &pageData{
 		ActivePage:     "trackers",
 		PageTitle:      "Tracker Configuration",
 		TrackerSummary: dashData.Trackers,
 		Groups:         groups,
+		TagFloors:      tagFloors,
 	})
+}
+
+func updateFloorsHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	// The form posts tag names and floors as parallel repeated fields, so a tag
+	// containing characters that are awkward in a field name still round-trips.
+	tags := r.Form["floor_tag"]
+	values := r.Form["floor_value"]
+	if len(tags) != len(values) {
+		setFlash(w, "error", "Tag floors not saved: malformed form.")
+		http.Redirect(w, r, "/trackers", http.StatusFound)
+		return
+	}
+
+	floors := make(config.Floors)
+	for i, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		floor, err := strconv.Atoi(strings.TrimSpace(values[i]))
+		if err != nil || floor < 0 {
+			setFlash(w, "error", "Tag floors not saved: floor for '"+tag+"' must be zero or a positive whole number.")
+			http.Redirect(w, r, "/trackers", http.StatusFound)
+			return
+		}
+		// Zero means no floor — leave it out rather than storing a no-op.
+		if floor > 0 {
+			floors[tag] = floor
+		}
+	}
+
+	engine.ConfigLock.Lock()
+	err := config.SaveJSON(config.FloorsFile, floors)
+	engine.ConfigLock.Unlock()
+
+	if err != nil {
+		log.Printf("Failed to save tag floors: %v", err)
+		setFlash(w, "error", "Tag floors could not be saved.")
+	} else {
+		setFlash(w, "success", "Tag floors saved.")
+	}
+	http.Redirect(w, r, "/trackers", http.StatusFound)
 }
 
 func rulesHandler(w http.ResponseWriter, r *http.Request) {
@@ -744,6 +822,7 @@ func exportSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		"settings": config.GetSettings(),
 		"rules":    config.LoadRules(),
 		"groups":   config.LoadGroups(),
+		"floors":   config.LoadFloors(),
 	}
 	engine.ConfigLock.Unlock()
 
@@ -814,6 +893,19 @@ func importSettingsHandler(w http.ResponseWriter, r *http.Request) {
 			config.SaveJSON(config.GroupsFile, groups)
 		}
 	}
+	// Backups taken before tag floors existed simply have no "floors" key and
+	// leave whatever is already configured alone.
+	if floorsRaw, ok := data["floors"]; ok {
+		var floors config.Floors
+		if err := json.Unmarshal(floorsRaw, &floors); err == nil {
+			for tag, floor := range floors {
+				if floor <= 0 {
+					delete(floors, tag)
+				}
+			}
+			config.SaveJSON(config.FloorsFile, floors)
+		}
+	}
 
 	log.Println("System: Full backup imported successfully.")
 
@@ -869,6 +961,9 @@ func factoryResetAllHandler(w http.ResponseWriter, r *http.Request) {
 		resetErr = err
 	}
 	if err := config.SaveJSON(config.GroupsFile, config.Groups{}); err != nil {
+		resetErr = err
+	}
+	if err := config.SaveJSON(config.FloorsFile, config.Floors{}); err != nil {
 		resetErr = err
 	}
 	engine.ConfigLock.Unlock()

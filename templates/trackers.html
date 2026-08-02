@@ -50,4 +50,53 @@
         </div>
     </form>
 </div>
+
+<div class="card">
+    <form action="/update_floors" method="POST">
+        {{.CSRFField}}
+        <div class="card-header">
+            <h3 class="card-title">Tag Floors</h3>
+        </div>
+
+        <p style="font-size: 13px; color: var(--text-muted); margin: 0 0 15px 0; max-width: 70ch;">
+            The fewest torrents that must survive under a tag. This is a hard backstop applied across
+            every rule in a run — no rule can remove a torrent that would take its tag below this number,
+            whatever that rule's own Min Keep says. Leave at 0 for no floor.
+        </p>
+
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tag</th>
+                        <th>Active Torrents</th>
+                        <th>Floor</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{if .TagFloors}}
+                    {{range .TagFloors}}
+                    <tr>
+                        <td style="font-weight: 500;">{{.Tag}}<input type="hidden" name="floor_tag" value="{{.Tag}}"></td>
+                        <td>{{.Count}}</td>
+                        <td>
+                            <input type="number" name="floor_value" aria-label="Floor for tag {{.Tag}}" value="{{.Floor}}" min="0" step="1" style="width: 120px;">
+                        </td>
+                    </tr>
+                    {{end}}
+                    {{else}}
+                    <tr>
+                        <td colspan="3" style="text-align: center; color: var(--text-muted); padding: 30px;">No tags assigned yet. Tag a tracker above first.</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        {{if .TagFloors}}
+        <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+            <button type="submit" class="btn btn-primary">Save Floors</button>
+        </div>
+        {{end}}
+    </form>
+</div>
 {{end}}

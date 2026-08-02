@@ -19,6 +19,7 @@ var (
 	LogFile       string
 	SecretKeyFile string
 	GroupsFile    string
+	FloorsFile    string
 	RulesFile     string
 	SettingsFile  string
 	LogoFile      string
@@ -34,6 +35,7 @@ func init() {
 	LogFile = filepath.Join(ConfigDir, "delegatarr.log")
 	SecretKeyFile = filepath.Join(ConfigDir, "secret.key")
 	GroupsFile = filepath.Join(ConfigDir, "groups.json")
+	FloorsFile = filepath.Join(ConfigDir, "floors.json")
 	RulesFile = filepath.Join(ConfigDir, "rules.json")
 	SettingsFile = filepath.Join(ConfigDir, "settings.json")
 	LogoFile = filepath.Join(ConfigDir, "logo.png")
@@ -109,6 +111,11 @@ func (r Rule) UsesGroupMinKeep() bool {
 // Groups is a map of tracker domain -> tag name.
 type Groups map[string]string
 
+// Floors is a map of tag name -> the fewest torrents that must survive under
+// that tag. It is a hard backstop enforced across every rule in a run,
+// independent of any rule's own Min Keep. Zero or missing means no floor.
+type Floors map[string]int
+
 // --- File I/O (thread-safe via caller-provided engine.ConfigLock) ---
 
 // LoadJSON reads a JSON file into the target, returning the default on error.
@@ -162,6 +169,21 @@ func LoadGroups() Groups {
 		log.Printf("Failed to load groups: %v", err)
 	}
 	return groups
+}
+
+// LoadFloors loads the per-tag minimum keep floors from disk, dropping any
+// entry that isn't an actual floor.
+func LoadFloors() Floors {
+	floors := make(Floors)
+	if err := LoadJSON(FloorsFile, &floors); err != nil {
+		log.Printf("Failed to load tag floors: %v", err)
+	}
+	for tag, floor := range floors {
+		if floor <= 0 {
+			delete(floors, tag)
+		}
+	}
+	return floors
 }
 
 // tzMu protects writes to time.Local so concurrent goroutines (e.g. the

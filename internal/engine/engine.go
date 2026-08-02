@@ -31,9 +31,12 @@ type StateCounts map[string]int
 // DashboardResult holds all data returned by GetDashboardData.
 type DashboardResult struct {
 	Trackers TrackerSummary
-	Labels   []string
-	States   StateCounts
-	Session  *deluge.SessionStatus
+	// Tags counts torrents per tag. A torrent is counted once per tag it
+	// carries, however many of the tag's domains it announces to.
+	Tags    TrackerSummary
+	Labels  []string
+	States  StateCounts
+	Session *deluge.SessionStatus
 }
 
 // GetDashboardData retrieves active tracker domains, unique labels, state counts,
@@ -64,7 +67,12 @@ func GetDashboardData() DashboardResult {
 	settings := config.GetSettings()
 	trackerMode := settings.TrackerMode
 
+	ConfigLock.Lock()
+	groups := config.LoadGroups()
+	ConfigLock.Unlock()
+
 	summary := TrackerSummary{}
+	tagCounts := TrackerSummary{}
 	labelsSet := map[string]bool{}
 	states := StateCounts{}
 
@@ -78,6 +86,10 @@ func GetDashboardData() DashboardResult {
 
 		if t.Label != "" {
 			labelsSet[t.Label] = true
+		}
+
+		for _, tag := range tagsForTorrent(t, groups, trackerMode) {
+			tagCounts[tag]++
 		}
 
 		trackerURLs := extractTrackerURLs(t)
@@ -112,6 +124,7 @@ func GetDashboardData() DashboardResult {
 
 	return DashboardResult{
 		Trackers: summary,
+		Tags:     tagCounts,
 		Labels:   labels,
 		States:   states,
 		Session:  session,
@@ -140,6 +153,7 @@ func ProcessTorrents(runType string) {
 	ConfigLock.Lock()
 	groups := config.LoadGroups()
 	rules := config.LoadRules()
+	floors := config.LoadFloors()
 	ConfigLock.Unlock()
 
 	if len(rules) == 0 || len(groups) == 0 {
@@ -213,6 +227,31 @@ func ProcessTorrents(runType string) {
 
 	var toRemove []removalEntry
 	seenIDs := map[string]bool{}
+
+	// Tag floors are a hard backstop that sits above the rules: whatever any
+	// rule's own Min Keep says, no combination of rules may take a tag below
+	// its floor. Census the tags now and count down as removals are queued.
+	// With no floors configured both maps stay empty and the checks below are
+	// no-ops.
+	torrentTags := map[string][]string{}
+	tagSurviving := map[string]int{}
+	if len(floors) > 0 {
+		for hash, ts := range torrents {
+			t := deluge.FromStatus(ts, "", deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
+			tags := tagsForTorrent(t, groups, trackerMode)
+			if len(tags) == 0 {
+				continue
+			}
+			torrentTags[hash] = tags
+			for _, tag := range tags {
+				tagSurviving[tag]++
+			}
+		}
+		for tag, floor := range floors {
+			log.Printf("%s Engine Run: Tag '%s' floor is %d, currently holding %d torrent(s).",
+				runType, tag, floor, tagSurviving[tag])
+		}
+	}
 
 	for _, rule := range rules {
 		if !rule.IsEnabled() {
@@ -390,6 +429,16 @@ func ProcessTorrents(runType string) {
 			}
 		}
 
+		// Evaluate the most removable first. If a tag floor cuts the rule short,
+		// the torrents left standing should be the ones its Removal Priority
+		// ranks highest, not whichever happened to be considered first.
+		for i, j := 0, len(candidates)-1; i < j; i, j = i+1, j-1 {
+			candidates[i], candidates[j] = candidates[j], candidates[i]
+		}
+
+		// Torrents this rule wanted but the tag floor held back, per tag.
+		floorBlocked := map[string]int{}
+
 		ruleTrackerStatus := strings.ToLower(strings.TrimSpace(rule.TrackerStatus))
 
 		if ruleTrackerStatus != "" {
@@ -448,6 +497,16 @@ func ProcessTorrents(runType string) {
 			}
 
 			if meetsCriteria {
+				// A torrent can sit under more than one tag; any tag already at
+				// its floor vetoes the removal.
+				if tag := blockingTagFloor(floors, tagSurviving, torrentTags[t.ID]); tag != "" {
+					floorBlocked[tag]++
+					continue
+				}
+				for _, tag := range torrentTags[t.ID] {
+					tagSurviving[tag]--
+				}
+
 				seenIDs[t.ID] = true
 				toRemove = append(toRemove, removalEntry{
 					ID:         t.ID,
@@ -458,6 +517,11 @@ func ProcessTorrents(runType string) {
 					DeleteData: rule.DeleteData,
 				})
 			}
+		}
+
+		for _, tag := range sortedKeys(floorBlocked) {
+			log.Printf("%s Engine Run: Rule '%s' — %d torrent(s) held back by the floor of %d on tag '%s'.",
+				runType, targetGroup, floorBlocked[tag], floors[tag], tag)
 		}
 	}
 
@@ -502,6 +566,53 @@ func ProcessTorrents(runType string) {
 }
 
 // --- helpers ---
+
+// tagsForTorrent returns the distinct tags a torrent carries, honouring the
+// tracker mode. A torrent with trackers under several tagged domains carries
+// every one of those tags.
+func tagsForTorrent(t deluge.TorrentInfo, groups config.Groups, trackerMode string) []string {
+	trackerURLs := extractTrackerURLs(t)
+	if len(trackerURLs) == 0 {
+		return nil
+	}
+	if trackerMode == "top" {
+		trackerURLs = trackerURLs[:1]
+	}
+
+	var tags []string
+	seen := map[string]bool{}
+	for _, rawURL := range trackerURLs {
+		tag := groups[extractDomain(rawURL)]
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+	}
+	return tags
+}
+
+// blockingTagFloor returns the first of the torrent's tags that has already
+// reached its floor, or "" if removing the torrent breaches none of them.
+func blockingTagFloor(floors config.Floors, surviving map[string]int, tags []string) string {
+	for _, tag := range tags {
+		if floor, ok := floors[tag]; ok && surviving[tag] <= floor {
+			return tag
+		}
+	}
+	return ""
+}
+
+// sortedKeys returns a map's keys in a stable order, so log lines don't shuffle
+// between runs.
+func sortedKeys(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 // sortByRemovalPriority orders candidates so protected torrents come first and
 // removal candidates sit at the tail.

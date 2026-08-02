@@ -63,6 +63,7 @@ All config is stored in the `/config` volume:
 | `settings.json` | App settings (interval, dry run, timezone, webhooks) |
 | `rules.json` | Removal rules |
 | `groups.json` | Tracker domain to tag mappings |
+| `floors.json` | Per-tag minimum keep floors |
 | `delegatarr.log` | Application log |
 
 These files are compatible with the original Python version of Delegatarr.
@@ -87,6 +88,8 @@ Conditions can be combined with AND/OR logic. Tracker status can also be used as
 | All torrents with this tag | Every torrent carrying the tag, whatever its label or state. All rules on the tag protect the same torrents, so together they can't prune below the floor. |
 
 Protected torrents are the ones the rule's Removal Priority ranks last. Existing rules keep the rule-only scope.
+
+Min Keep is still per-rule, so a rule with no floor of its own can prune a tag that another rule was trying to protect. For a floor that holds regardless of which rule fires, set a **tag floor** on the Trackers page: the fewest torrents that must survive under a tag, enforced across every rule in a run. A removal that would take a tag below its floor is refused and logged, whatever the rule asked for. Tag floors live in `floors.json` and are included in settings backups.
 
 ## Building locally
 
