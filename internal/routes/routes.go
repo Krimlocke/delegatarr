@@ -130,12 +130,15 @@ type pageData struct {
 
 	// Page-specific data
 	TrackerSummary engine.TrackerSummary
-	Groups         config.Groups
-	TagFloors      []tagFloor
-	RulesList      []config.Rule
-	UniqueTags     []string
-	UniqueLabels   []string
-	LogContent     string
+	// NoTrackerDomain is the pseudo-domain trackerless torrents are listed
+	// under, so the Trackers page can flag that row for what it is.
+	NoTrackerDomain string
+	Groups          config.Groups
+	TagFloors       []tagFloor
+	RulesList       []config.Rule
+	UniqueTags      []string
+	UniqueLabels    []string
+	LogContent      string
 
 	// Dashboard data
 	DashTotalTorrents  int
@@ -597,11 +600,12 @@ func trackersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderPage(w, r, "trackers.html", &pageData{
-		ActivePage:     "trackers",
-		PageTitle:      "Tracker Configuration",
-		TrackerSummary: dashData.Trackers,
-		Groups:         groups,
-		TagFloors:      tagFloors,
+		ActivePage:      "trackers",
+		PageTitle:       "Tracker Configuration",
+		TrackerSummary:  dashData.Trackers,
+		NoTrackerDomain: config.NoTrackerDomain,
+		Groups:          groups,
+		TagFloors:       tagFloors,
 	})
 }
 

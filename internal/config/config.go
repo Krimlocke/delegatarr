@@ -108,6 +108,13 @@ func (r Rule) UsesGroupMinKeep() bool {
 	return r.MinKeepScope == MinKeepScopeGroup
 }
 
+// NoTrackerDomain is the stand-in domain used for torrents that announce to no
+// tracker at all. Deluge files these under a blank entry in its tracker filter,
+// and without a domain of their own they could never be tagged, so no rule
+// could ever reach them. Tagging this pseudo-domain on the Trackers page brings
+// them under the same rules as everything else.
+const NoTrackerDomain = "(no tracker)"
+
 // Groups is a map of tracker domain -> tag name.
 type Groups map[string]string
 

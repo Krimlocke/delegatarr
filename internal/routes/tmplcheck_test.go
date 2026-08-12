@@ -21,8 +21,9 @@ func TestTemplatesParseAndRender(t *testing.T) {
 			{Tag: "ipt", Count: 12, Floor: 10},
 			{Tag: "tl", Count: 3, Floor: 0},
 		},
-		Groups:         config.Groups{"tracker.example.com": "ipt"},
-		TrackerSummary: map[string]int{"tracker.example.com": 12},
+		Groups:          config.Groups{"tracker.example.com": "ipt"},
+		TrackerSummary:  map[string]int{"tracker.example.com": 12, config.NoTrackerDomain: 1},
+		NoTrackerDomain: config.NoTrackerDomain,
 		RulesList: []config.Rule{
 			{GroupID: "ipt", MinTorrents: 10, MinKeepScope: config.MinKeepScopeGroup, SeedRatio: &ratio, Enabled: &enabled},
 			{GroupID: "tl", MinTorrents: 0, SeedRatio: &ratio, Enabled: &enabled},
