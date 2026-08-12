@@ -1,0 +1,4 @@
+# Not tracked on purpose: the Dockerfile copies go.sum only if present
+# (COPY go.mod go.sum* ./) and runs `go mod tidy` during the build, so the
+# checksums are regenerated there. Local builds regenerate it too.
+go.sum
