@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	rencode "github.com/gdm85/go-rencode"
@@ -188,7 +190,10 @@ type rawConn struct {
 
 func rawConnect(hostname string, portNum int, login, password string) (*rawConn, error) {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	raw, err := dialer.Dial("tcp", fmt.Sprintf("%s:%d", hostname, portNum))
+	// JoinHostPort brackets an IPv6 literal itself, so drop any brackets the
+	// DELUGE_HOST value already carries rather than nesting a second pair.
+	addr := net.JoinHostPort(strings.Trim(hostname, "[]"), strconv.Itoa(portNum))
+	raw, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial: %w", err)
 	}
