@@ -6,7 +6,7 @@ Automated torrent lifecycle management for [Deluge](https://deluge-torrent.org/)
 
 Delegatarr connects to your Deluge daemon over RPC and continuously evaluates torrents against your removal rules. When a torrent meets the criteria, it gets removed automatically (with optional data deletion).
 
-**Tag trackers** — Assign custom tags to tracker domains so rules can target specific trackers or groups of trackers.
+**Tag trackers** — Assign custom tags to tracker domains so rules can target specific trackers or groups of trackers. Torrents with no tracker at all are listed under a `(no tracker)` row on the Trackers page; tag that row and rules reach them like anything else.
 
 **Build rules** — Each rule targets a tag + label + state combination. Set removal conditions using:
 - Seeding time, total age, or time paused (minutes/hours/days)
@@ -79,6 +79,14 @@ Rules evaluate torrents that match a specific **tag + label + state** filter. Re
 | Tracker status | Tracker status string contains a pattern (e.g. `unregistered torrent`) |
 
 Conditions can be combined with AND/OR logic. Tracker status can also be used as the sole condition with no time or ratio requirement.
+
+### Trackerless torrents
+
+A torrent can reach Deluge carrying no tracker at all — a `*arr` grab from a debrid or DHT-sourced release, for instance. Deluge files these under a blank entry in its tracker filter, and with no domain to tag them against they used to sit outside every rule forever.
+
+They now appear on the Trackers page as **`(no tracker)`**, counted like any other tracker domain. Assign it a tag and rules targeting that tag apply to them normally — including tag floors and Min Keep. Leave it untagged and nothing changes: they stay untouched, and (if untagged-tracker notifications are on) `(no tracker)` shows up in that alert so you know they are there.
+
+Note that these torrents never announce, so their tracker status is empty — rules keyed on a tracker status pattern such as `unregistered torrent` won't match them. Use a time or ratio condition instead.
 
 **Min Keep** sets a floor on how many torrents survive, and you choose what it counts:
 

@@ -92,18 +92,8 @@ func GetDashboardData() DashboardResult {
 			tagCounts[tag]++
 		}
 
-		trackerURLs := extractTrackerURLs(t)
-		if trackerMode == "top" && len(trackerURLs) > 0 {
-			trackerURLs = trackerURLs[:1]
-		}
-
-		seen := map[string]bool{}
-		for _, rawURL := range trackerURLs {
-			domain := extractDomain(rawURL)
-			if domain != "" && !seen[domain] {
-				seen[domain] = true
-				summary[domain]++
-			}
+		for _, domain := range trackerDomains(t, trackerMode) {
+			summary[domain]++
 		}
 	}
 
@@ -190,13 +180,11 @@ func ProcessTorrents(runType string) {
 		untaggedSet := map[string]bool{}
 		for hash, ts := range torrents {
 			t := deluge.FromStatus(ts, "", deluge.FromStatusOpts{TrackerURLs: fullTrackers[hash]})
-			trackerURLs := extractTrackerURLs(t)
-			for _, rawURL := range trackerURLs {
-				domain := extractDomain(rawURL)
-				if domain != "" {
-					if _, tagged := groups[domain]; !tagged {
-						untaggedSet[domain] = true
-					}
+			// "all" regardless of the tracker mode: this notification reports
+			// every domain seen, not just the ones the rules act on.
+			for _, domain := range trackerDomains(t, "all") {
+				if _, tagged := groups[domain]; !tagged {
+					untaggedSet[domain] = true
 				}
 			}
 		}
@@ -295,17 +283,8 @@ func ProcessTorrents(runType string) {
 			label := t.Label
 			state := t.State
 
-			trackerURLs := extractTrackerURLs(t)
-			if len(trackerURLs) == 0 {
-				continue
-			}
-			if trackerMode == "top" {
-				trackerURLs = trackerURLs[:1]
-			}
-
 			matchedGroup := false
-			for _, rawURL := range trackerURLs {
-				domain := extractDomain(rawURL)
+			for _, domain := range trackerDomains(t, trackerMode) {
 				if groups[domain] == targetGroup {
 					matchedGroup = true
 					break
@@ -571,18 +550,10 @@ func ProcessTorrents(runType string) {
 // tracker mode. A torrent with trackers under several tagged domains carries
 // every one of those tags.
 func tagsForTorrent(t deluge.TorrentInfo, groups config.Groups, trackerMode string) []string {
-	trackerURLs := extractTrackerURLs(t)
-	if len(trackerURLs) == 0 {
-		return nil
-	}
-	if trackerMode == "top" {
-		trackerURLs = trackerURLs[:1]
-	}
-
 	var tags []string
 	seen := map[string]bool{}
-	for _, rawURL := range trackerURLs {
-		tag := groups[extractDomain(rawURL)]
+	for _, domain := range trackerDomains(t, trackerMode) {
+		tag := groups[domain]
 		if tag == "" || seen[tag] {
 			continue
 		}

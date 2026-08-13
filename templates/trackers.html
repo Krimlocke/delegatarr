@@ -34,6 +34,11 @@
                         <td>{{$count}}</td>
                         <td>
                             <input type="text" class="tag-input" aria-label="Tag assignment for {{$tracker}}" name="{{$tracker}}" value="{{index $.Groups $tracker}}" placeholder="Tag (or 'REMOVE')" style="width: 200px;">
+                            {{if eq $tracker $.NoTrackerDomain}}
+                            <div style="font-size: 12px; color: var(--text-muted); margin-top: 6px; max-width: 55ch;">
+                                Torrents announcing to no tracker at all. Tag them like any other row to bring them under your rules; leave this blank and they stay untouched.
+                            </div>
+                            {{end}}
                         </td>
                     </tr>
                     {{end}}
