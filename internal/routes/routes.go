@@ -158,6 +158,7 @@ type pageData struct {
 	DashDownloadRate   string
 	DashUploadRate     string
 	DashStateStats     []DashStateStat
+	DashLabelStats     []DashLabelStat
 }
 
 type flashMsg struct {
@@ -182,6 +183,12 @@ type DashRuleStat struct {
 
 type DashTrackerStat struct {
 	Name    string
+	Count   int
+	Percent int
+}
+
+type DashLabelStat struct {
+	Label   string
 	Count   int
 	Percent int
 }
@@ -540,6 +547,29 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(stateStats, func(i, j int) bool { return stateStats[i].Count > stateStats[j].Count })
 
+	// Label breakdown. Equal counts are common here, so the name breaks the tie
+	// and the card keeps the same order from one refresh to the next.
+	var labelStats []DashLabelStat
+	maxLabel := 0
+	for _, count := range dashData.LabelCounts {
+		if count > maxLabel {
+			maxLabel = count
+		}
+	}
+	for label, count := range dashData.LabelCounts {
+		pct := 0
+		if maxLabel > 0 {
+			pct = (count * 100) / maxLabel
+		}
+		labelStats = append(labelStats, DashLabelStat{Label: label, Count: count, Percent: pct})
+	}
+	sort.Slice(labelStats, func(i, j int) bool {
+		if labelStats[i].Count != labelStats[j].Count {
+			return labelStats[i].Count > labelStats[j].Count
+		}
+		return labelStats[i].Label < labelStats[j].Label
+	})
+
 	renderPage(w, r, "dashboard.html", &pageData{
 		ActivePage:        "dashboard",
 		PageTitle:         "Dashboard",
@@ -559,6 +589,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		DashDownloadRate:  dlRate,
 		DashUploadRate:    ulRate,
 		DashStateStats:    stateStats,
+		DashLabelStats:    labelStats,
 	})
 }
 

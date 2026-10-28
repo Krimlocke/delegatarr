@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/krimlocke/delegatarr/internal/config"
+	"github.com/krimlocke/delegatarr/internal/engine"
 )
 
 func TestTemplatesParseAndRender(t *testing.T) {
@@ -28,9 +29,16 @@ func TestTemplatesParseAndRender(t *testing.T) {
 			{GroupID: "ipt", MinTorrents: 10, MinKeepScope: config.MinKeepScopeGroup, SeedRatio: &ratio, Enabled: &enabled},
 			{GroupID: "tl", MinTorrents: 0, SeedRatio: &ratio, Enabled: &enabled},
 		},
+		DashStateStats: []DashStateStat{
+			{State: "Seeding", Count: 16, Percent: 100, Color: "success"},
+		},
+		DashLabelStats: []DashLabelStat{
+			{Label: "seed", Count: 15, Percent: 100},
+			{Label: engine.NoLabel, Count: 1, Percent: 6},
+		},
 	}
 
-	for _, page := range []string{"trackers.html", "rules.html"} {
+	for _, page := range []string{"trackers.html", "rules.html", "dashboard.html"} {
 		tmpl, ok := pageTemplates[page]
 		if !ok {
 			t.Fatalf("%s not loaded", page)

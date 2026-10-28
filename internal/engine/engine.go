@@ -28,15 +28,27 @@ type TrackerSummary map[string]int
 // StateCounts maps torrent state (Seeding, Downloading, Paused, etc.) -> count.
 type StateCounts map[string]int
 
+// LabelCounts maps Deluge label -> count. Torrents the Label plugin reports no
+// label for are filed under NoLabel.
+type LabelCounts map[string]int
+
+// NoLabel is the stand-in used for torrents carrying no Deluge label. A rule
+// with a blank label reaches them like anything else, so they belong in the
+// breakdown rather than missing from it.
+const NoLabel = "(no label)"
+
 // DashboardResult holds all data returned by GetDashboardData.
 type DashboardResult struct {
 	Trackers TrackerSummary
 	// Tags counts torrents per tag. A torrent is counted once per tag it
 	// carries, however many of the tag's domains it announces to.
-	Tags    TrackerSummary
-	Labels  []string
-	States  StateCounts
-	Session *deluge.SessionStatus
+	Tags   TrackerSummary
+	Labels []string
+	// LabelCounts counts torrents per label, the unlabelled included under
+	// NoLabel. Labels is the bare list of names the rule form offers.
+	LabelCounts LabelCounts
+	States      StateCounts
+	Session     *deluge.SessionStatus
 }
 
 // GetDashboardData retrieves active tracker domains, unique labels, state counts,
@@ -74,6 +86,7 @@ func GetDashboardData() DashboardResult {
 	summary := TrackerSummary{}
 	tagCounts := TrackerSummary{}
 	labelsSet := map[string]bool{}
+	labelCounts := LabelCounts{}
 	states := StateCounts{}
 
 	for hash, ts := range torrents {
@@ -86,6 +99,9 @@ func GetDashboardData() DashboardResult {
 
 		if t.Label != "" {
 			labelsSet[t.Label] = true
+			labelCounts[t.Label]++
+		} else {
+			labelCounts[NoLabel]++
 		}
 
 		for _, tag := range tagsForTorrent(t, groups, trackerMode) {
@@ -113,11 +129,12 @@ func GetDashboardData() DashboardResult {
 	ConfigLock.Unlock()
 
 	return DashboardResult{
-		Trackers: summary,
-		Tags:     tagCounts,
-		Labels:   labels,
-		States:   states,
-		Session:  session,
+		Trackers:    summary,
+		Tags:        tagCounts,
+		Labels:      labels,
+		LabelCounts: labelCounts,
+		States:      states,
+		Session:     session,
 	}
 }
 
